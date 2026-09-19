@@ -77,6 +77,38 @@ rendered by ElevenLabs TTS and plays in the browser. Then the vendor answers:
 The transcript shape is identical either way, so the judge cannot tell how the
 words were captured. Both audio clips are kept and replayable in the UI.
 
+## Deploying to Vercel
+
+```bash
+npx vercel            # preview
+npx vercel --prod     # production
+```
+
+Then set the keys as project environment variables — **never commit `.env`**:
+
+```bash
+npx vercel env add NVIDIA_API_KEY
+npx vercel env add ELEVENLABS_API_KEY
+npx vercel env add NEMOTRON_MODELS
+npx vercel env add LLM_TIMEOUT
+```
+
+What the serverless port required, and what it costs:
+
+- **State is ephemeral.** The bundle is read-only, so SQLite and recordings live
+  in `/tmp`, which is per-instance and wiped on cold start. In practice every
+  visitor gets their own freshly seeded demo, which is what you want when judges
+  are opening the link on their own phones — but two people will not see each
+  other's holds, and a hold can vanish if a later request lands on a cold
+  instance. Don't leave a demo half-finished and come back to it.
+- **Audio is returned inline** as a base64 data URI rather than as a URL. The
+  agent's mp3 is written to one instance's `/tmp`, and the browser's follow-up
+  request can land on another and 404.
+- **Duration is fine.** Hobby allows 300s, and a full reset with live Nemotron
+  takes ~30s.
+- **HTTPS is a bonus.** `getUserMedia` needs a secure context, so the microphone
+  works on the deployed URL from any phone — which localhost cannot give a judge.
+
 ## Under the hood
 
 The second tab in the UI shows **every call to Nemotron and ElevenLabs as it

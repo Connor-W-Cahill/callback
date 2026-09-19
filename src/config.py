@@ -14,8 +14,15 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 SEED = DATA / "seed"
-DB_PATH = Path(os.getenv("DATABASE_URL", DATA / "callback.sqlite"))
-RECORDINGS = ROOT / "recordings"
+
+# Serverless: the bundle is read-only and only /tmp is writable. /tmp is also
+# per-instance and wiped on cold start, so state here is ephemeral by design --
+# every visitor effectively gets their own freshly seeded demo.
+SERVERLESS = bool(os.getenv("VERCEL"))
+_STATE = Path("/tmp/callback") if SERVERLESS else ROOT
+
+DB_PATH = Path(os.getenv("DATABASE_URL", "") or (_STATE / "data" / "callback.sqlite"))
+RECORDINGS = _STATE / "recordings"
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")

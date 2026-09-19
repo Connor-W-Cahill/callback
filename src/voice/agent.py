@@ -94,7 +94,10 @@ def synthesize(text: str, tag: str) -> str:
     )
     r.raise_for_status()
     out.write_bytes(r.content)
-    return str(out.relative_to(config.ROOT))
+    try:
+        return str(out.relative_to(config.ROOT))
+    except ValueError:
+        return str(out)  # serverless: RECORDINGS lives under /tmp, outside ROOT
 
 
 class STTUnavailable(RuntimeError):
@@ -118,7 +121,10 @@ def transcribe(data: bytes, filename: str = "reply.webm", *, keep_as: str | None
         suffix = Path(filename).suffix or ".webm"
         out = config.RECORDINGS / f"{keep_as}{suffix}"
         out.write_bytes(data)
-        saved = str(out.relative_to(config.ROOT))
+        try:
+            saved = str(out.relative_to(config.ROOT))
+        except ValueError:
+            saved = str(out)
 
     import time as _t
 

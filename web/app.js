@@ -110,7 +110,9 @@ async function openCall(id) {
       call.contact_name ? ` — ${call.contact_name}` : ""
     }, the number on file. Not a number from the email.</div>
     <div class="transcript"><span class="agent">AGENT:</span> ${escapeHtml(call.agent_line)}</div>
-    ${call.agent_audio ? `<audio controls autoplay src="/api/recording/${call.agent_audio.split("/").pop()}"></audio>` : ""}
+    ${call.agent_audio_inline || call.agent_audio
+        ? `<audio controls autoplay src="${call.agent_audio_inline || "/api/recording/" + call.agent_audio.split("/").pop()}"></audio>`
+        : ""}
     <div class="answer">
       <h4 style="margin-top:18px">The vendor answers</h4>
       ${

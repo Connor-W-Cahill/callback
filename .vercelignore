@@ -1,0 +1,9 @@
+.venv/
+.env
+data/callback.sqlite*
+recordings/
+evals/
+scripts/
+__pycache__/
+*.pyc
+.git/

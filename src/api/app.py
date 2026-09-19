@@ -1,4 +1,5 @@
 """Backend for the AP clerk's hold queue."""
+import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -137,9 +138,17 @@ def open_call(hold_id: str):
 
     line = voice.script_for(vendor, ex)
     audio = None
+    audio_inline = None
     if config.have_elevenlabs():
         try:
             audio = voice.synthesize(line, f"agent-{vendor['id']}")
+            # Inline it as a data URI. On serverless the file lives in this
+            # instance's /tmp, and the browser's follow-up GET may land on a
+            # different instance and 404.
+            raw = (config.ROOT / audio).read_bytes() if not config.SERVERLESS else (
+                Path(audio) if Path(audio).is_absolute() else config.ROOT / audio
+            ).read_bytes()
+            audio_inline = "data:audio/mpeg;base64," + base64.b64encode(raw).decode()
         except Exception:  # noqa: BLE001 - the clerk can still read the line
             audio = None
 
@@ -148,6 +157,7 @@ def open_call(hold_id: str):
         "contact_name": vendor["contact_name"],
         "agent_line": line,
         "agent_audio": audio,
+        "agent_audio_inline": audio_inline,
         "stt_available": config.have_elevenlabs(),
     }
 

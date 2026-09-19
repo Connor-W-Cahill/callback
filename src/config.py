@@ -54,6 +54,18 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
 HOLD_THRESHOLD = float(os.getenv("HOLD_THRESHOLD", "0.35"))
 
 
+# --- Twilio (phase 4: the callback as a real phone call) -------------------
+# Off unless all of these are set AND CALLBACK_AUTO_CALL=1. Real phone calls are
+# the only action here with consequences off the laptop.
+TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_FROM = os.getenv("TWILIO_FROM", "").strip()
+# Where Twilio can reach us: a cloudflared/ngrok tunnel, or the Vercel URL.
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+# Place the verification call automatically when inbound mail is held.
+AUTO_CALL = os.getenv("CALLBACK_AUTO_CALL", "0") == "1"
+
+
 def have_nemotron() -> bool:
     return bool(NVIDIA_API_KEY)
 

@@ -7,7 +7,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -16,6 +16,7 @@ from src.extract import extractor
 from src.ingest import inbox, poller
 from src.pipeline import process, verify
 from src.voice import agent as voice
+from src.voice import telephony
 
 app = FastAPI(title="Callback", description="Vendor payment-change fraud interceptor")
 WEB = config.ROOT / "web"
@@ -69,6 +70,94 @@ def mailbox_status():
     ).fetchone()[0]
     st["poll_seconds"] = poller.POLL_SECONDS
     return st
+
+
+# --- telephony (phase 4) -------------------------------------------------
+
+def start_verification_call(c, hold_id: str) -> dict:
+    """Dial the vendor for real and let the recording come back by webhook."""
+    if not telephony.configured():
+        raise HTTPException(400, "Twilio is not configured (see README: phase 4)")
+
+    hold = c.execute("SELECT * FROM hold WHERE id=?", (hold_id,)).fetchone()
+    if hold is None:
+        raise HTTPException(404, "no such hold")
+    if not hold["vendor_id"]:
+        raise HTTPException(400, "cannot verify: no vendor on file to call")
+    vendor = dict(c.execute("SELECT * FROM vendor WHERE id=?", (hold["vendor_id"],)).fetchone())
+    msg = c.execute("SELECT extracted FROM message WHERE id=?", (hold["message_id"],)).fetchone()
+    ex = extractor.Extraction(**json.loads(msg["extracted"]))
+
+    line = voice.script_for(vendor, ex)
+    audio_url = None
+    if config.have_elevenlabs():
+        try:
+            rel = voice.synthesize(line, f"agent-{vendor['id']}")
+            audio_url = f"{config.PUBLIC_BASE_URL}/api/recording/{Path(rel).name}"
+        except Exception:  # noqa: BLE001 - Twilio's own TTS is the fallback
+            audio_url = None
+
+    action = f"{config.PUBLIC_BASE_URL}/api/twilio/recording?hold_id={hold_id}"
+    handle = telephony.place_call(
+        to=vendor["phone_on_file"],          # from the vendor master. Never the email.
+        twiml=telephony.twiml_for(audio_url, line, action),
+        status_callback=f"{config.PUBLIC_BASE_URL}/api/twilio/status?hold_id={hold_id}",
+    )
+    c.execute("UPDATE hold SET status='calling' WHERE id=?", (hold_id,))
+    c.commit()
+    db.log(c, "twilio", "call_placed", hold_id, f"dialed {vendor['phone_on_file']} sid={handle.sid}")
+    return {"sid": handle.sid, "to": handle.to, "status": handle.status, "hold_status": "calling"}
+
+
+@app.post("/api/holds/{hold_id}/dial")
+def dial(hold_id: str):
+    """Place the verification call over the real phone network."""
+    return start_verification_call(conn(ensure_seeded=True), hold_id)
+
+
+@app.post("/api/twilio/recording")
+async def twilio_recording(request: Request, hold_id: str = ""):
+    """Twilio posts the vendor's recorded answer here. Transcribe, judge, resolve."""
+    form = dict(await request.form())
+    url = str(request.url)
+    if not telephony.valid_signature(url, form, request.headers.get("X-Twilio-Signature", "")):
+        # This endpoint acts on what it receives, so an unsigned caller could
+        # drive the fraud control. Refuse anything that does not verify.
+        raise HTTPException(403, "bad Twilio signature")
+
+    rec_url = form.get("RecordingUrl")
+    if not rec_url:
+        return Response(content="<Response/>", media_type="application/xml")
+
+    c = conn()
+    try:
+        audio = telephony.fetch_recording(rec_url)
+        result = verify(c, hold_id, reply_audio=audio, audio_filename="twilio.wav")
+        db.log(c, "twilio", f"call_{result['judgment']}", hold_id, result["reasoning"])
+    except Exception as e:  # noqa: BLE001 - never hand Twilio a 500
+        db.log(c, "twilio", "call_failed", hold_id, str(e)[:200])
+
+    return Response(
+        content='<?xml version="1.0" encoding="UTF-8"?><Response>'
+                '<Say voice="Polly.Joanna">Thank you. Goodbye.</Say></Response>',
+        media_type="application/xml",
+    )
+
+
+@app.post("/api/twilio/status")
+async def twilio_status(request: Request, hold_id: str = ""):
+    """Call lifecycle events: no answer, busy, failed."""
+    form = dict(await request.form())
+    if not telephony.valid_signature(str(request.url), form, request.headers.get("X-Twilio-Signature", "")):
+        raise HTTPException(403, "bad Twilio signature")
+    status = form.get("CallStatus", "")
+    if status in ("no-answer", "busy", "failed", "canceled"):
+        c = conn()
+        # Nobody confirmed anything, so the payment stays put.
+        c.execute("UPDATE hold SET status='escalated' WHERE id=? AND status='calling'", (hold_id,))
+        c.commit()
+        db.log(c, "twilio", f"call_{status}", hold_id, "no verification obtained; payment stays held")
+    return Response(content="<Response/>", media_type="application/xml")
 
 
 # --- vendor master -------------------------------------------------------

@@ -62,6 +62,55 @@ evals/cases/   labeled synthetic emails
 evals/transcripts/  labeled synthetic call transcripts
 ```
 
+## Phase 4: a real phone call (optional)
+
+With Twilio configured, an inbound email that asks to move money triggers an
+actual outbound call to the vendor's number on file, records the answer, runs it
+through ElevenLabs STT and Nemotron's judge, and resolves the hold — with no
+human touching the browser.
+
+It is **off by default and gated twice**: all four Twilio settings must be
+present *and* `CALLBACK_AUTO_CALL=1`. Placing real calls is the only thing this
+project does with consequences outside the laptop, and an inbound email is an
+untrusted trigger. The number still comes from the vendor master; nothing in an
+email ever chooses who gets dialed.
+
+### What it costs
+
+| | |
+| --- | --- |
+| US local number | $1.15/month |
+| Outbound, US | $0.014/min (~1¢ per 45s verification call) |
+| Trial upgrade | ~$20 minimum, to remove the spoken trial notice before your audio |
+
+Under $25 all in. The real costs are the tunnel, the setup, and one more thing
+to break on stage.
+
+### Setup
+
+1. Create a Twilio account and buy a US local number (you must do this — it
+   needs payment details).
+2. Give Twilio a public URL to reach you. Locally:
+   ```bash
+   cloudflared tunnel --url http://localhost:8000
+   ```
+3. Put the values in `.env`:
+   ```
+   TWILIO_ACCOUNT_SID=AC...
+   TWILIO_AUTH_TOKEN=...
+   TWILIO_FROM=+1...
+   PUBLIC_BASE_URL=https://<your-tunnel>.trycloudflare.com
+   CALLBACK_AUTO_CALL=1
+   ```
+4. **Set a vendor's phone to a real number you control.** The seeded numbers are
+   555 placeholders and are unroutable — auto-dialing them does nothing. Use the
+   Vendors tab.
+
+Webhooks verify Twilio's `X-Twilio-Signature` and reject anything unsigned:
+`/api/twilio/recording` acts on what it receives, so an unsigned caller could
+otherwise drive the fraud control. A call that goes unanswered, busy or failed
+leaves the payment held and escalated — no answer is never an approval.
+
 ## The verification call
 
 Click a held payment, then **Place verification call**. The agent's question is

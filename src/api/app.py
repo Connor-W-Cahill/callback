@@ -35,12 +35,12 @@ def status():
 @app.post("/api/reset")
 def reset():
     """Reseed and reprocess the demo inbox. Safe to hit between demo runs."""
-    for suffix in ("", "-wal", "-shm"):
-        f = Path(str(config.DB_PATH) + suffix)
-        if f.exists():
-            f.unlink()
+    # Truncate rather than unlink. Deleting the file out from under other open
+    # connections silently loses rows -- it dropped a whole message, and with it
+    # the demo, the first time this ran concurrently.
     llm.STATS.reset()
     c = conn()
+    db.clear(c)
     db.seed(c)
     messages = inbox.load()
 

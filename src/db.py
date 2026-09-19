@@ -145,6 +145,13 @@ def seed(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def clear(conn: sqlite3.Connection) -> None:
+    """Empty every table, in FK-safe order. Used by /api/reset between demo runs."""
+    for table in ("verification", "hold", "message", "audit", "payment", "vendor"):
+        conn.execute(f"DELETE FROM {table}")
+    conn.commit()
+
+
 def vendors(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute("SELECT * FROM vendor").fetchall()
     out = []

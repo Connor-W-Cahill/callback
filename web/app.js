@@ -279,8 +279,22 @@ $("#reset").addEventListener("click", async () => {
   await load();
 });
 
-loadStatus();
-api("/api/reset", { method: "POST" }).then(load);
+// Seed on first load only. A reset costs ~8 Nemotron calls and a page load is
+// free to anyone with the URL, so resetting unconditionally lets a crawler or a
+// link-preview bot drain the credits this demo runs on. The Reset button is
+// still there for a deliberate re-run.
+async function boot() {
+  await loadStatus();
+  try {
+    const holds = await api("/api/holds");
+    if (!holds.length) await api("/api/reset", { method: "POST" });
+  } catch (e) {
+    /* fall through to load() and show whatever state exists */
+  }
+  await load();
+}
+
+boot();
 
 
 // --- "Under the hood": what Nemotron and ElevenLabs actually did -----------

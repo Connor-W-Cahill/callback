@@ -75,10 +75,14 @@ RETRIES = int(os.getenv("LLM_RETRIES", "2"))
 #            omni emits a think block then valid JSON, which parses cleanly.
 #   judge    same shape as score -- reasoning first, so route it the same way.
 JOB_MODELS = {
-    "score": ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-              "nvidia/nemotron-3-super-120b-a12b"],
-    "judge": ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-              "nvidia/nemotron-3-super-120b-a12b"],
+    # Only omni. super-120b was kept as a backstop here and earned nothing: it
+    # reliably spends ~8s deliberating in prose and returns no JSON, so falling
+    # through to it just delays the rules path that would have answered
+    # correctly and instantly. The rules scorer IS the backstop for these two.
+    "score": ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"],
+    "judge": ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"],
+    "vendor_match": ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+                     "nvidia/nemotron-3-super-120b-a12b"],
 }
 
 # Reasoning jobs need a longer budget: scoring and judging think before they
@@ -129,9 +133,13 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
 
     # Walk the model chain. A model that 404s for this account, 503s, or hangs
     # should cost us one timeout, not the whole request.
-    preferred = JOB_MODELS.get(job, [config.NEMOTRON_MODEL])
-    models = [m for m in preferred if m in config.NEMOTRON_MODELS or True]
-    models += [m for m in config.NEMOTRON_MODELS if m not in models]
+    # A job with an explicit route uses only that route: falling through to a
+    # model measured to fail this prompt costs latency and buys nothing.
+    if job in JOB_MODELS:
+        models = list(JOB_MODELS[job])
+    else:
+        models = [config.NEMOTRON_MODEL]
+        models += [m for m in config.NEMOTRON_MODELS if m not in models]
     for model in models:
         # Rebuild per model. Dropping response_format for one model that
         # rejects it must not silently disarm schema-constrained decoding for

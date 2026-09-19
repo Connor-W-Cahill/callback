@@ -360,8 +360,133 @@ const JOBS = {
 function switchView(view) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
   $("#view-queue").hidden = view !== "queue";
+  $("#view-vendors").hidden = view !== "vendors";
   $("#view-engine").hidden = view !== "engine";
   if (view === "engine") renderEngine();
+  if (view === "vendors") renderVendors();
+}
+
+// --- vendor master -------------------------------------------------------
+
+let vendors = [];
+let editing = null;
+
+async function renderVendors() {
+  vendors = await api("/api/vendors");
+  $("#view-vendors").innerHTML = `
+    <div class="engine-inner">
+      <h2>Vendor master</h2>
+      <p class="lede">The record every inbound email is checked against. The bank
+        account here is what a payment-change request gets compared to — edit it and
+        the same email scores differently. Add a vendor whose domain matches a real
+        address to make mail from it resolve to a known supplier instead of a stranger.</p>
+      <button id="addvendor">Add vendor</button>
+      <div class="vlist">${vendors.map(vendorCard).join("")}</div>
+    </div>`;
+
+  $("#addvendor").addEventListener("click", () => {
+    editing = "__new__";
+    renderVendorForm();
+  });
+  document.querySelectorAll("[data-edit]").forEach((b) =>
+    b.addEventListener("click", () => {
+      editing = b.dataset.edit;
+      renderVendorForm();
+    })
+  );
+  document.querySelectorAll("[data-del]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const v = vendors.find((x) => x.id === b.dataset.del);
+      if (!confirm(`Delete ${v.name}? Its payment history and any holds go too.`)) return;
+      await fetch(`/api/vendors/${b.dataset.del}`, { method: "DELETE" });
+      await renderVendors();
+      await load();
+    })
+  );
+}
+
+function vendorCard(v) {
+  return `<div class="vcard${v.custom ? " custom" : ""}">
+    <div class="vhead">
+      <b>${escapeHtml(v.name)}</b>
+      ${v.custom ? '<span class="pill held">edited</span>' : ""}
+      <span class="grow"></span>
+      <button class="ghost" data-edit="${v.id}">Edit</button>
+      <button class="ghost" data-del="${v.id}">Delete</button>
+    </div>
+    <div class="vgrid">
+      <div><span>Account on file</span><code>${escapeHtml(v.account)}</code></div>
+      <div><span>Routing</span><code>${escapeHtml(v.routing || "—")}</code></div>
+      <div><span>Phone we call</span><code>${escapeHtml(v.phone_on_file || "—")}</code></div>
+      <div><span>Domains</span>${(v.domains || []).map((d) => `<code>${escapeHtml(d)}</code>`).join(" ") || "—"}</div>
+      <div class="wide"><span>Known senders</span>${(v.known_senders || []).map((d) => `<code>${escapeHtml(d)}</code>`).join(" ") || "—"}</div>
+      <div><span>Payment history</span>${v.payments} payments</div>
+    </div>
+  </div>`;
+}
+
+function renderVendorForm() {
+  const isNew = editing === "__new__";
+  const v = isNew
+    ? { id: "", name: "", domains: [], known_senders: [], phone_on_file: "", contact_name: "",
+        account: "", routing: "", country: "US", bank_name: "", category: "" }
+    : vendors.find((x) => x.id === editing);
+
+  $("#view-vendors").innerHTML = `
+    <div class="engine-inner">
+      <h2>${isNew ? "Add a vendor" : "Edit " + escapeHtml(v.name)}</h2>
+      <div class="vform">
+        ${field("name", "Vendor name", v.name, "Allegheny Sheet Metal")}
+        ${field("contact_name", "Contact", v.contact_name || "", "Denise Perkins")}
+        ${field("account", "Bank account on file", v.account, "8841003392",
+                "The signal everything hangs on: a request to pay a different account is what gets held.")}
+        ${field("routing", "Routing", v.routing || "", "043000096")}
+        ${field("phone_on_file", "Phone to call for verification", v.phone_on_file || "", "+1-412-555-0142",
+                "Never taken from the email. This is the number the voice agent dials.")}
+        ${field("domains", "Domains", (v.domains || []).join(", "), "alleghenysheetmetal.com",
+                "Comma separated. Mail from a near-miss of one of these is flagged as a lookalike.")}
+        ${field("known_senders", "Known sender addresses", (v.known_senders || []).join(", "),
+                "billing@alleghenysheetmetal.com", "Comma separated. Anything else is a first-contact signal.")}
+        ${field("bank_name", "Bank", v.bank_name || "", "Dollar Bank")}
+        ${field("country", "Country", v.country || "US", "US")}
+        <div class="row-btns">
+          <button id="savevendor">${isNew ? "Create vendor" : "Save changes"}</button>
+          <button id="cancelvendor" class="ghost">Cancel</button>
+          <span id="vmsg" class="note"></span>
+        </div>
+      </div>
+    </div>`;
+
+  $("#cancelvendor").addEventListener("click", () => {
+    editing = null;
+    renderVendors();
+  });
+  $("#savevendor").addEventListener("click", async () => {
+    const body = {};
+    document.querySelectorAll("[data-f]").forEach((i) => (body[i.dataset.f] = i.value));
+    const r = await fetch(isNew ? "/api/vendors" : `/api/vendors/${editing}`, {
+      method: isNew ? "POST" : "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      let m = await r.text();
+      try { m = JSON.parse(m).detail || m; } catch (e) {}
+      $("#vmsg").innerHTML = `<span class="fail">${escapeHtml(m)}</span>`;
+      return;
+    }
+    editing = null;
+    await renderVendors();
+    await load();
+  });
+}
+
+function field(name, label, value, placeholder, help) {
+  return `<label class="vfield">
+    <span>${label}</span>
+    <input data-f="${name}" value="${escapeHtml(String(value ?? ""))}" placeholder="${escapeHtml(placeholder)}">
+    ${help ? `<em>${escapeHtml(help)}</em>` : ""}
+  </label>`;
 }
 
 async function renderEngine() {

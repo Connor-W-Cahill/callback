@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS vendor (
     routing TEXT NOT NULL,
     country TEXT NOT NULL,
     bank_name TEXT,
-    category TEXT
+    category TEXT,
+    custom INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS payment (
@@ -100,17 +101,25 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for col in ("reply_audio_path", "reply_source"):
         if col not in have:
             conn.execute(f"ALTER TABLE verification ADD COLUMN {col} TEXT")
+    vhave = {r["name"] for r in conn.execute("PRAGMA table_info(vendor)")}
+    if "custom" not in vhave:
+        conn.execute("ALTER TABLE vendor ADD COLUMN custom INTEGER NOT NULL DEFAULT 0")
 
 
 def seed(conn: sqlite3.Connection) -> None:
     """Load the synthetic vendor master and payment history. Idempotent."""
     vendors = json.loads((config.SEED / "vendors.json").read_text())
+    edited = {
+        r["id"] for r in conn.execute("SELECT id FROM vendor WHERE custom = 1")
+    }
     for v in vendors:
+        if v["id"] in edited:
+            continue  # the user's version wins
         conn.execute(
             """INSERT OR REPLACE INTO vendor
                (id, name, domains, known_senders, phone_on_file, contact_name,
-                account, routing, country, bank_name, category)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                account, routing, country, bank_name, category, custom)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 v["id"],
                 v["name"],
@@ -123,6 +132,7 @@ def seed(conn: sqlite3.Connection) -> None:
                 v["bank"]["country"],
                 v["bank"].get("bank_name"),
                 v.get("category"),
+                0,
             ),
         )
 
@@ -146,9 +156,14 @@ def seed(conn: sqlite3.Connection) -> None:
 
 
 def clear(conn: sqlite3.Connection) -> None:
-    """Empty every table, in FK-safe order. Used by /api/reset between demo runs."""
-    for table in ("verification", "hold", "message", "audit", "payment", "vendor"):
+    """Empty the demo state, in FK-safe order. Used by /api/reset between runs.
+
+    Vendors the user added or edited (custom=1) survive: resetting the demo
+    should not throw away a vendor somebody just typed in.
+    """
+    for table in ("verification", "hold", "message", "audit", "payment"):
         conn.execute(f"DELETE FROM {table}")
+    conn.execute("DELETE FROM vendor WHERE custom = 0")
     conn.commit()
 
 

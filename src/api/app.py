@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -68,6 +69,96 @@ def mailbox_status():
     ).fetchone()[0]
     st["poll_seconds"] = poller.POLL_SECONDS
     return st
+
+
+# --- vendor master -------------------------------------------------------
+
+def _clean_list(v) -> list[str]:
+    """Accept a list or a comma/newline separated string from the form."""
+    if isinstance(v, list):
+        items = v
+    else:
+        items = re.split(r"[,\n]", str(v or ""))
+    return [x.strip().lower() for x in items if str(x).strip()]
+
+
+@app.get("/api/vendors")
+def list_vendors():
+    c = conn(ensure_seeded=True)
+    out = []
+    for v in db.vendors(c):
+        v["payments"] = c.execute(
+            "SELECT COUNT(*) FROM payment WHERE vendor_id=?", (v["id"],)
+        ).fetchone()[0]
+        out.append(v)
+    return sorted(out, key=lambda v: v["name"].lower())
+
+
+@app.put("/api/vendors/{vendor_id}")
+def upsert_vendor(vendor_id: str, body: dict):
+    """Create or update a vendor. Always marks it custom so /api/reset keeps it."""
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    account = re.sub(r"\D", "", str(body.get("account") or ""))
+    if not account:
+        raise HTTPException(400, "account number is required -- it is the signal everything hangs on")
+
+    c = conn(ensure_seeded=True)
+    c.execute(
+        """INSERT OR REPLACE INTO vendor
+           (id, name, domains, known_senders, phone_on_file, contact_name,
+            account, routing, country, bank_name, category, custom)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,1)""",
+        (
+            vendor_id,
+            name,
+            json.dumps(_clean_list(body.get("domains"))),
+            json.dumps(_clean_list(body.get("known_senders"))),
+            (body.get("phone_on_file") or "").strip(),
+            (body.get("contact_name") or "").strip() or None,
+            account,
+            re.sub(r"\D", "", str(body.get("routing") or "")),
+            (body.get("country") or "US").strip().upper(),
+            (body.get("bank_name") or "").strip() or None,
+            (body.get("category") or "").strip() or None,
+        ),
+    )
+    c.commit()
+    db.log(c, "user", "vendor_saved", vendor_id, name)
+    return {"ok": True, "id": vendor_id}
+
+
+@app.post("/api/vendors")
+def create_vendor(body: dict):
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:32] or "vendor"
+    c = conn(ensure_seeded=True)
+    vid, n = f"v-{slug}", 1
+    while c.execute("SELECT 1 FROM vendor WHERE id=?", (vid,)).fetchone():
+        n += 1
+        vid = f"v-{slug}-{n}"
+    return upsert_vendor(vid, body)
+
+
+@app.delete("/api/vendors/{vendor_id}")
+def delete_vendor(vendor_id: str):
+    c = conn(ensure_seeded=True)
+    if not c.execute("SELECT 1 FROM vendor WHERE id=?", (vendor_id,)).fetchone():
+        raise HTTPException(404, "no such vendor")
+    # Holds and payments reference the vendor, so they go first or the FK bites.
+    c.execute("DELETE FROM payment WHERE vendor_id=?", (vendor_id,))
+    c.execute(
+        "DELETE FROM verification WHERE hold_id IN (SELECT id FROM hold WHERE vendor_id=?)",
+        (vendor_id,),
+    )
+    c.execute("DELETE FROM hold WHERE vendor_id=?", (vendor_id,))
+    c.execute("DELETE FROM vendor WHERE id=?", (vendor_id,))
+    c.commit()
+    db.log(c, "user", "vendor_deleted", vendor_id, "")
+    return {"ok": True}
 
 
 @app.get("/api/status")

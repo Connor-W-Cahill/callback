@@ -133,38 +133,70 @@ async function openCall(id) {
   $("#useseed").addEventListener("click", () => sendReply(id, { seeded: true }));
 }
 
+let recStartedAt = 0;
+
 async function toggleRecord(id) {
   const btn = $("#rec");
   const state = $("#recstate");
 
   if (recorder && recorder.state === "recording") {
     recorder.stop();
-    btn.textContent = "● Hold the mic — record the reply";
+    btn.textContent = "● Record the reply";
     btn.classList.remove("recording");
-    state.textContent = "processing…";
+    state.textContent = "transcribing…";
     return;
   }
+
+  // The agent's line autoplays. If it is still talking the mic records IT, and
+  // the judge ends up reading our own question back -- which reads as unclear.
+  document.querySelectorAll("audio").forEach((a) => {
+    a.pause();
+    a.currentTime = 0;
+  });
 
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    state.textContent = "microphone blocked — type the reply instead";
+    state.innerHTML = '<span class="fail">microphone blocked — type the reply instead</span>';
     return;
   }
 
   chunks = [];
-  recorder = new MediaRecorder(stream);
-  recorder.ondataavailable = (e) => chunks.push(e.data);
+  try {
+    recorder = new MediaRecorder(stream);
+  } catch (e) {
+    state.innerHTML = '<span class="fail">cannot record here — type the reply instead</span>';
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size) chunks.push(e.data);
+  };
   recorder.onstop = async () => {
     stream.getTracks().forEach((t) => t.stop());
-    const blob = new Blob(chunks, { type: "audio/webm" });
+    const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+    const secs = (Date.now() - recStartedAt) / 1000;
+
+    // A tiny blob means silence or a mis-selected input. Sending it produces a
+    // garbage transcript and an "inconclusive" verdict that looks like the
+    // product failing, when really nothing was recorded.
+    if (blob.size < 2000 || secs < 0.8) {
+      state.innerHTML =
+        `<span class="fail">only ${secs.toFixed(1)}s / ${blob.size} bytes captured — ` +
+        `check your input device, or type the reply.</span>`;
+      return;
+    }
+    state.textContent = `sending ${(blob.size / 1024).toFixed(0)}KB…`;
     await sendReply(id, { blob });
   };
+
   recorder.start();
+  recStartedAt = Date.now();
   btn.textContent = "■ Stop and transcribe";
   btn.classList.add("recording");
-  state.textContent = "listening…";
+  state.innerHTML = '<span class="rec-dot"></span> listening — speak now';
 }
 
 async function sendReply(id, { blob, seeded } = {}) {
@@ -175,10 +207,19 @@ async function sendReply(id, { blob, seeded } = {}) {
     if (typed) fd.append("text", typed);
   }
 
-  const r = await fetch(`/api/holds/${id}/reply`, { method: "POST", body: fd });
+  let r;
+  try {
+    r = await fetch(`/api/holds/${id}/reply`, { method: "POST", body: fd });
+  } catch (e) {
+    showReplyError(`network error: ${e.message}`);
+    return;
+  }
   if (!r.ok) {
-    const state = $("#recstate");
-    if (state) state.textContent = await r.text();
+    let msg = await r.text();
+    try {
+      msg = JSON.parse(msg).detail || msg;
+    } catch (e) {}
+    showReplyError(msg);
     return;
   }
   await load();
@@ -199,12 +240,24 @@ function renderVerification(v) {
     <div class="dial">Dialled <b>${v.dialed_number}</b> — the number on file, not one from the email.
       ${sourceLabel(v.reply_source)}</div>
     <div class="transcript">${transcript}</div>
+    ${v.judgment === "unclear" ? `<div class="note warn">Inconclusive means the vendor neither confirmed nor
+       denied — read the transcript above. If it shows our own agent line, the mic picked up the speaker;
+       if it is empty or garbled, nothing was captured. Re-record, or type the reply.</div>` : ""}
     ${v.judge_quote ? `<div class="note">Judged on: “${escapeHtml(v.judge_quote)}”</div>` : ""}
+    ${v.judge_reasoning ? `<div class="note">Reasoning: ${escapeHtml(v.judge_reasoning)}</div>` : ""}
     ${v.audio_path ? `<div class="note" style="margin-top:12px">Agent</div>
        <audio controls src="/api/recording/${v.audio_path.split("/").pop()}"></audio>` : ""}
     ${v.reply_audio_path ? `<div class="note">Vendor — what was actually said</div>
        <audio controls src="/api/recording/${v.reply_audio_path.split("/").pop()}"></audio>` : ""}
   </div>`;
+}
+
+function showReplyError(msg) {
+  const state = $("#recstate");
+  const block = $("#callblock");
+  const html = `<span class="fail">${escapeHtml(msg)}</span>`;
+  if (state) state.innerHTML = html;
+  else if (block) block.insertAdjacentHTML("beforeend", `<div class="note">${html}</div>`);
 }
 
 function sourceLabel(src) {

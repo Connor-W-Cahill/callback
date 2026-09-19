@@ -90,7 +90,7 @@ def holds():
         d = dict(r)
         d["signals"] = [s for s in json.loads(d["signals"]) if s["fired"]]
         ver = c.execute(
-            "SELECT * FROM verification WHERE hold_id=? ORDER BY created_at DESC LIMIT 1", (d["id"],)
+            "SELECT * FROM verification WHERE hold_id=? ORDER BY id DESC LIMIT 1", (d["id"],)
         ).fetchone()
         d["verification"] = dict(ver) if ver else None
         out.append(d)
@@ -112,7 +112,7 @@ def hold_detail(hold_id: str):
     d = dict(r)
     d["signals"] = json.loads(d["signals"])
     d["extracted"] = json.loads(d["extracted"]) if d["extracted"] else None
-    ver = c.execute("SELECT * FROM verification WHERE hold_id=? ORDER BY created_at DESC", (hold_id,)).fetchall()
+    ver = c.execute("SELECT * FROM verification WHERE hold_id=? ORDER BY id DESC", (hold_id,)).fetchall()
     d["verifications"] = [dict(v) for v in ver]
     return d
 

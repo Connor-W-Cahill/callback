@@ -12,6 +12,9 @@
   --accent: #6aa9ff;
 }
 * { box-sizing: border-box; }
+/* `main { display: grid }` outranks the UA rule for [hidden], so without this
+   the tab switch sets the attribute and nothing moves. */
+[hidden] { display: none !important; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
   font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -139,3 +142,7 @@ table.sum td.desc { color: var(--dim); max-width: 340px; }
   padding: 2px 7px; border-radius: 4px; }
 .badge.nemotron { background: #16301a; color: #7ee787; }
 .badge.elevenlabs { background: #1c2331; color: var(--accent); }
+.note.warn { color: var(--warn); font-style: normal; }
+.rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--danger); margin-right: 6px; animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }

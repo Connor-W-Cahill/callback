@@ -29,7 +29,7 @@ class Decision:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def process(conn: sqlite3.Connection, message: dict, *, use_llm: bool = True) -> Decision:

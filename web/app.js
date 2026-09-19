@@ -1,5 +1,4 @@
 const $ = (s) => document.querySelector(s);
-let holds = [];
 let selected = null;
 
 const money = (n) => (n == null ? "" : n.toLocaleString("en-US", { style: "currency", currency: "USD" }));
@@ -49,47 +48,136 @@ async function loadStatus() {
   $("#status").textContent = `nemotron: ${s.nemotron} · voice: ${s.elevenlabs}`;
 }
 
-async function load() {
-  holds = await api("/api/holds");
-  const msgs = await api("/api/messages");
-  renderQueue(msgs);
-  if (selected) {
-    const still = holds.find((h) => h.id === selected);
-    if (still) showDetail(selected);
-  }
+let board = { open: { needs_review: [], calling: [], escalated: [] },
+              settled: { accepted: [], denied: [] }, extraneous: [] };
+let bucket = "open:needs_review";
+
+const BUCKETS = [
+  ["open", "Open", [
+    ["needs_review", "Needs review", "Payment-detail changes awaiting verification. Flagged when we cannot tell who sent it."],
+    ["calling", "Calling", "A verification call is in flight."],
+    ["escalated", "Escalated", "The call settled nothing. A human decides."],
+  ]],
+  ["settled", "Settled", [
+    ["accepted", "Accepted", "Paid, or the banking change was confirmed by the vendor."],
+    ["denied", "Denied", "The vendor denied it. The payment is blocked."],
+  ]],
+  ["extraneous", "Extraneous", null],
+];
+
+function bucketItems(key) {
+  const [top, sub] = key.split(":");
+  return sub ? (board[top] && board[top][sub]) || [] : board[top] || [];
 }
 
-function renderQueue(msgs) {
-  $("#count").textContent = holds.length ? `(${holds.length})` : "";
-  $("#holds").innerHTML = holds
-    .map((h) => {
-      const high = h.score >= 0.6;
-      const status = h.status === "held"
-        ? `<span class="pill ${high ? "high" : "med"}">${high ? "high risk" : "review"}</span>`
-        : `<span class="pill ${h.status}">${h.status}</span>`;
-      return `<div class="card ${high ? "high" : ""} ${selected === h.id ? "sel" : ""}" data-id="${h.id}">
-        <div class="vendor">${h.vendor_name || "Unrecognised vendor"} ${status}</div>
-        <div class="sub">${h.subject || ""}</div>
-        <div class="why">${h.rationale}</div>
-      </div>`;
-    })
-    .join("");
+function bucketBlurb(key) {
+  const [top, sub] = key.split(":");
+  if (top === "extraneous") return "Mail that was never about money. It never reached the fraud checks.";
+  const grp = BUCKETS.find((b) => b[0] === top);
+  const found = (grp && grp[2] || []).find((x) => x[0] === sub);
+  return found ? found[2] : "";
+}
 
-  if (!holds.length) {
-    $("#holds").innerHTML =
-      `<div class="empty">Nothing held. Email the address above and anything that
-       asks to move money shows up here.</div>`;
+function countOf(key) {
+  return bucketItems(key).length;
+}
+
+async function load() {
+  board = await api("/api/board");
+  renderSubtabs();
+  renderBucket();
+}
+
+function renderSubtabs() {
+  const curTop = bucket.split(":")[0];
+  let html = BUCKETS.map(function (b) {
+    const top = b[0], label = b[1], subs = b[2];
+    const total = subs
+      ? subs.reduce((n, x) => n + countOf(top + ":" + x[0]), 0)
+      : countOf(top);
+    const firstKey = subs ? top + ":" + subs[0][0] : top;
+    return '<button class="stab ' + (top === curTop ? "active" : "") + '" data-b="' + firstKey + '">' +
+      label + (total ? ' <span class="n">' + total + "</span>" : "") + "</button>";
+  }).join("");
+
+  const grp = BUCKETS.find((b) => b[0] === curTop);
+  if (grp && grp[2]) {
+    html += '<div class="subsub">' + grp[2].map(function (x) {
+      const key = curTop + ":" + x[0];
+      const n = countOf(key);
+      return '<button class="ssub ' + (bucket === key ? "active" : "") + '" data-b="' + key + '">' +
+        x[1] + (n ? ' <span class="n">' + n + "</span>" : "") + "</button>";
+    }).join("") + "</div>";
   }
+  $("#subtabs").innerHTML = html;
 
-  const cleared = msgs.filter((m) => m.status === "cleared");
-  $("#cleared").innerHTML = cleared.length
-    ? `<h2>Cleared — paid without friction</h2>` +
-      cleared.map((m) => `<div class="row">${m.subject} <span style="float:right">${m.sender}</span></div>`).join("")
-    : "";
+  document.querySelectorAll("[data-b]").forEach((b) =>
+    b.addEventListener("click", () => {
+      bucket = b.dataset.b;
+      selected = null;
+      $("#detail").innerHTML = '<div class="empty">Select an item to see the detail.</div>';
+      renderSubtabs();
+      renderBucket();
+    })
+  );
+}
+
+function renderBucket() {
+  const items = bucketItems(bucket);
+  $("#holds").innerHTML =
+    '<p class="blurb">' + bucketBlurb(bucket) + "</p>" +
+    (items.length
+      ? items.map(card).join("")
+      : '<div class="empty">Nothing here. Email <b>the address above</b> and anything about money shows up in Open.</div>');
 
   document.querySelectorAll(".card").forEach((c) =>
-    c.addEventListener("click", () => showDetail(c.dataset.id))
+    c.addEventListener("click", () => {
+      if (c.dataset.kind === "hold") showDetail(c.dataset.id);
+      else showMessage(c.dataset.id);
+    })
   );
+}
+
+function card(h) {
+  const high = h.score >= 0.6;
+  const unknown = h.kind === "hold" && !h.identified;
+  const pills = {
+    held: unknown
+      ? '<span class="pill med">unidentified sender</span>'
+      : '<span class="pill ' + (high ? "high" : "med") + '">' + (high ? "high risk" : "review") + "</span>",
+    calling: '<span class="pill held">calling…</span>',
+    escalated: '<span class="pill escalated">escalated</span>',
+    approved: '<span class="pill approved">accepted</span>',
+    blocked: '<span class="pill blocked">denied</span>',
+    cleared: '<span class="pill approved">paid</span>',
+    extraneous: "",
+  };
+  const pill = pills[h.status] || "";
+  return '<div class="card ' + (high && h.status === "held" ? "high " : "") +
+    (unknown ? "unknown " : "") + (selected === h.id ? "sel" : "") +
+    '" data-id="' + h.id + '" data-kind="' + h.kind + '">' +
+    '<div class="vendor">' + escapeHtml(h.vendor_name || senderName(h.sender)) + " " + pill + "</div>" +
+    '<div class="sub">' + escapeHtml(h.subject || "(no subject)") + " · " + escapeHtml(h.sender || "") + "</div>" +
+    (h.rationale ? '<div class="why">' + escapeHtml(h.rationale) + "</div>" : "") +
+    "</div>";
+}
+
+function senderName(s) {
+  return (s || "unknown").split("@")[0];
+}
+
+async function showMessage(id) {
+  selected = id;
+  const msgs = await api("/api/messages");
+  const m = msgs.find((x) => x.id === id) || {};
+  $("#detail").innerHTML =
+    "<h3>" + escapeHtml(senderName(m.sender)) + "</h3>" +
+    '<div class="meta">' + escapeHtml(m.subject || "") + " · from " + escapeHtml(m.sender || "") + "</div>" +
+    '<div class="block"><h4>Why it is here</h4><div>' +
+    (m.status === "extraneous"
+      ? "Nothing in this message concerns money, so it never reached the fraud checks."
+      : "This invoice matched the vendor on file, so it cleared and was paid without friction.") +
+    "</div></div>";
 }
 
 async function showDetail(id) {
@@ -333,10 +421,10 @@ boot();
 // New mail arrives on its own schedule, so the queue has to notice.
 setInterval(async () => {
   if (!$("#view-engine").hidden) return;
-  const before = holds.length;
+  const before = countOf("open:needs_review") + countOf("open:calling");
   await loadMailbox();
   await load();
-  if (holds.length > before) {
+  if (countOf("open:needs_review") + countOf("open:calling") > before) {
     const bar = $("#mailbar");
     bar.classList.add("flash");
     setTimeout(() => bar.classList.remove("flash"), 1200);

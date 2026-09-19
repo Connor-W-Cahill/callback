@@ -320,6 +320,82 @@ def reset():
     return {"processed": results, "llm": {"succeeded": llm.STATS.succeeded, "fell_back": llm.STATS.failed}}
 
 
+@app.get("/api/board")
+def board():
+    """The queue as the clerk thinks about it.
+
+    open      — still needs something to happen
+      needs_review  awaiting verification; flagged when we cannot tell who sent it
+      calling       a verification call is in flight
+      escalated     the call resolved nothing; a human has to decide
+    settled   — accepted (paid, or the change confirmed) / denied (blocked)
+    extraneous — mail that was never about money
+    """
+    c = conn(ensure_seeded=True)
+    rows = c.execute(
+        """SELECT h.*, m.sender, m.subject, m.received_at, m.id AS msg_id,
+                  v.name AS vendor_name, v.phone_on_file
+           FROM hold h JOIN message m ON m.id = h.message_id
+           LEFT JOIN vendor v ON v.id = h.vendor_id
+           ORDER BY h.score DESC, h.created_at DESC"""
+    ).fetchall()
+
+    def item(r):
+        d = dict(r)
+        ver = c.execute(
+            "SELECT judgment, reply_source, created_at FROM verification "
+            "WHERE hold_id=? ORDER BY id DESC LIMIT 1", (d["id"],)
+        ).fetchone()
+        return {
+            "id": d["id"], "kind": "hold",
+            "vendor_name": d["vendor_name"], "vendor_id": d["vendor_id"],
+            "identified": bool(d["vendor_id"]),
+            "sender": d["sender"], "subject": d["subject"],
+            "received_at": d["received_at"], "score": d["score"],
+            "rationale": d["rationale"], "status": d["status"],
+            "phone_on_file": d["phone_on_file"],
+            "judgment": ver["judgment"] if ver else None,
+            "reply_source": ver["reply_source"] if ver else None,
+        }
+
+    items = [item(r) for r in rows]
+    open_ = [i for i in items if i["status"] in ("held", "calling", "escalated")]
+
+    # A routine invoice that cleared is a payment we accepted without friction.
+    cleared = [
+        {"id": m["id"], "kind": "message", "vendor_name": None, "identified": True,
+         "sender": m["sender"], "subject": m["subject"], "received_at": m["received_at"],
+         "score": 0, "rationale": "Cleared — nothing unusual; paid without friction.",
+         "status": "cleared", "judgment": None}
+        for m in c.execute(
+            "SELECT id, sender, subject, received_at FROM message "
+            "WHERE status='cleared' ORDER BY received_at DESC"
+        ).fetchall()
+    ]
+    extraneous = [
+        {"id": m["id"], "kind": "message", "sender": m["sender"], "subject": m["subject"],
+         "received_at": m["received_at"], "status": "extraneous",
+         "rationale": "Not about money — never reached the fraud checks."}
+        for m in c.execute(
+            "SELECT id, sender, subject, received_at FROM message "
+            "WHERE status='extraneous' ORDER BY received_at DESC"
+        ).fetchall()
+    ]
+
+    return {
+        "open": {
+            "needs_review": [i for i in open_ if i["status"] == "held"],
+            "calling": [i for i in open_ if i["status"] == "calling"],
+            "escalated": [i for i in open_ if i["status"] == "escalated"],
+        },
+        "settled": {
+            "accepted": [i for i in items if i["status"] == "approved"] + cleared,
+            "denied": [i for i in items if i["status"] == "blocked"],
+        },
+        "extraneous": extraneous,
+    }
+
+
 @app.get("/api/messages")
 def messages():
     c = conn(ensure_seeded=True)

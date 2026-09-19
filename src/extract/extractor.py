@@ -19,10 +19,14 @@ Return ONLY a JSON object, no prose. Schema:
   "bank_account": string or null,
   "bank_routing": string or null,
   "bank_country": string or null,
+  "payment_related": boolean,
   "requests_payment_change": boolean,
   "discourages_verification": boolean,
   "urgency": "none" | "low" | "high"
 }
+payment_related is true if the message concerns money at all: an invoice, a
+statement, a payment, a remittance, banking or account details. A newsletter, a
+sales pitch, a scheduling note or personal mail is false.
 requests_payment_change is true if the message asks to update, change, or newly
 specify where payment should be sent.
 discourages_verification is true if the message discourages calling, says the sender
@@ -39,11 +43,12 @@ SCHEMA = {
         "bank_account": {"type": ["string", "null"]},
         "bank_routing": {"type": ["string", "null"]},
         "bank_country": {"type": ["string", "null"]},
+        "payment_related": {"type": "boolean"},
         "requests_payment_change": {"type": "boolean"},
         "discourages_verification": {"type": "boolean"},
         "urgency": {"type": "string", "enum": ["none", "low", "high"]},
     },
-    "required": ["requests_payment_change", "discourages_verification", "urgency"],
+    "required": ["payment_related", "requests_payment_change", "discourages_verification", "urgency"],
 }
 
 ACCOUNT_RE = re.compile(r"(?:acct|account)\D{0,20}(\d[\d\s-]{6,19}\d)", re.I)
@@ -71,6 +76,14 @@ URGENT_PHRASES = [
 ]
 
 
+PAYMENT_WORDS = re.compile(
+    r"\b(invoice|inv[-\s]?\d|statement|remit\w*|payment|pay(?:able|ment)?|"
+    r"bank\w*|account|routing|aba|ach|wire|deposit|balance|billing|bill|"
+    r"amount due|past due|net\s?\d+|purchase order|\bp\.?o\.?\b)\b",
+    re.I,
+)
+
+
 @dataclass
 class Extraction:
     vendor_name: str | None = None
@@ -80,6 +93,7 @@ class Extraction:
     bank_account: str | None = None
     bank_routing: str | None = None
     bank_country: str | None = None
+    payment_related: bool = False
     requests_payment_change: bool = False
     discourages_verification: bool = False
     urgency: str = "none"
@@ -118,6 +132,11 @@ def extract_rules(message: dict) -> Extraction:
     inv = INVOICE_RE.search(text)
 
     requests_change = bool(CHANGE_RE.search(text))
+    # Anything about money at all. A dollar figure or an account number counts
+    # even when the wording is unusual.
+    payment_related = bool(
+        PAYMENT_WORDS.search(text) or amount is not None or account or inv
+    )
 
     urgency = "none"
     hits = sum(1 for p in URGENT_PHRASES if p in low)
@@ -139,6 +158,7 @@ def extract_rules(message: dict) -> Extraction:
         bank_account=account,
         bank_routing=routing,
         bank_country=country,
+        payment_related=payment_related or requests_change,
         requests_payment_change=requests_change,
         discourages_verification=any(p in low for p in DISCOURAGE_PHRASES),
         urgency=urgency,
@@ -162,6 +182,7 @@ def _from_model(data: dict) -> Extraction:
         bank_account=_digits_only(data.get("bank_account")),
         bank_routing=_digits_only(data.get("bank_routing")),
         bank_country=data.get("bank_country") or "US",
+        payment_related=bool(data.get("payment_related")) or bool(data.get("requests_payment_change")),
         requests_payment_change=bool(data.get("requests_payment_change")),
         discourages_verification=bool(data.get("discourages_verification")),
         urgency=data.get("urgency") or "none",

@@ -70,6 +70,15 @@ def process(conn: sqlite3.Connection, message: dict, *, use_llm: bool = True) ->
         else ("risk score above threshold" if held else "cleared")
     )
 
+    # Mail that is not about money at all never reaches the fraud logic. It is
+    # filed as extraneous so the queue stays about payments.
+    if not ex.payment_related:
+        _save_message(conn, message, ex)
+        conn.execute("UPDATE message SET status='extraneous' WHERE id=?", (message["id"],))
+        conn.commit()
+        db.log(conn, "system", "message_extraneous", message["id"], "not payment related")
+        return Decision(message["id"], vendor, ex, sig, assessment, False, "not payment related")
+
     _save_message(conn, message, ex)
     hold_id = None
     if held:

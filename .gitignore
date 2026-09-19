@@ -9,11 +9,18 @@ node_modules/
 dist/
 build/
 .DS_Store
-*.sqlite
-*.db
 data/*.json
 !data/seed/
 recordings/
 public/
 .vercel
 data/mailbox.json
+
+# SQLite, including the write-ahead log and shared-memory files. The WAL held a
+# Twilio Account SID and was blocked by GitHub push protection -- '*.sqlite'
+# alone does not match 'callback.sqlite-wal'.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+data/callback.sqlite*

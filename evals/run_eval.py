@@ -118,6 +118,13 @@ def bar(label, value, width=28):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true", help="emit machine-readable results")
+    ap.add_argument(
+        "--model",
+        action="append",
+        default=[],
+        help="Nemotron model id to evaluate; repeat to compare several "
+        "(e.g. --model nvidia/nemotron-nano-3-30b-a3b --model nvidia/nemotron-3-super-120b-a12b)",
+    )
     args = ap.parse_args()
 
     emails = json.loads((Path(__file__).parent / "cases" / "emails.json").read_text())
@@ -128,13 +135,21 @@ def main() -> None:
     db.seed(conn)
 
     live = config.have_nemotron()
-    conditions = [("rules only", False)] + ([("rules + nemotron", True)] if live else [])
+    conditions: list[tuple[str, bool]] = [("rules only", False)]
+    if live:
+        models = args.model or [config.NEMOTRON_MODEL]
+        conditions += [(f"rules + {m.split('/')[-1]}", True) for m in models]
+    elif args.model:
+        print("NVIDIA_API_KEY is not set, so --model has nothing to run against.\n")
 
     results = {}
     print("=" * 66)
     print(f"EVAL 1 — fraud detection   ({len(emails)} labeled synthetic emails)")
     print("=" * 66)
+    models_iter = iter(args.model or ([config.NEMOTRON_MODEL] if live else []))
     for name, use_llm in conditions:
+        if use_llm:
+            config.NEMOTRON_MODEL = next(models_iter, config.NEMOTRON_MODEL)
         r = fraud_eval(conn, emails, use_llm=use_llm)
         results[name] = r
         print(f"\n{name.upper()}")
@@ -152,7 +167,10 @@ def main() -> None:
     print("=" * 66)
     print(f"EVAL 2 — transcript judge   ({len(transcripts)} labeled call transcripts)")
     print("=" * 66)
+    models_iter = iter(args.model or ([config.NEMOTRON_MODEL] if live else []))
     for name, use_llm in conditions:
+        if use_llm:
+            config.NEMOTRON_MODEL = next(models_iter, config.NEMOTRON_MODEL)
         j = judge_eval(transcripts, use_llm=use_llm)
         results[f"judge:{name}"] = j
         print(f"\n{name.upper()}")

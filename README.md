@@ -75,11 +75,33 @@ uv venv && uv pip install fastapi 'uvicorn[standard]' httpx python-dotenv
 ./run.sh            # http://localhost:8000
 ```
 
-To go live, copy `.env.example` to `.env` and fill in `NVIDIA_API_KEY` (Nemotron)
-and `ELEVENLABS_API_KEY` (voice). The banner in the UI shows which mode each is in.
+### Going live
+
+Copy `.env.example` to `.env` and fill in the two keys:
+
+- **`NVIDIA_API_KEY`** — sign up at [build.nvidia.com](https://build.nvidia.com), free credits on signup.
+  Default model is `nvidia/nemotron-nano-3-30b-a3b` (fast; this pipeline makes three
+  calls per message and demo latency matters). Swap `NEMOTRON_MODEL` to
+  `nvidia/nemotron-3-super-120b-a12b` for quality.
+- **`ELEVENLABS_API_KEY`** — [elevenlabs.io](https://elevenlabs.io), Profile → API Keys.
+  Every SteelHacks participant gets one free month of Creator tier (131k credits).
+
+Then verify before you demo:
 
 ```bash
+python scripts/preflight.py
+```
+
+It makes one real call to each service, confirms the model exists in NVIDIA's
+catalog, and prints your remaining ElevenLabs character credits and roughly how
+many verification calls that buys. A broken key fails here instead of on stage.
+The banner in the UI also shows which mode each service is in.
+
+```bash
+python scripts/preflight.py   # check keys + remaining credits
 python evals/run_eval.py      # both evals, prints the numbers for the slide
+python evals/run_eval.py --model nvidia/nemotron-nano-3-30b-a3b \
+                         --model nvidia/nemotron-3-super-120b-a12b   # compare models
 python evals/generate_cases.py    # regenerate the labeled email set
 python data/seed/generate_history.py   # regenerate payment history
 ```

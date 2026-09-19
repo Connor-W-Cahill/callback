@@ -19,7 +19,11 @@ RECORDINGS = ROOT / "recordings"
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
-NEMOTRON_MODEL = os.getenv("NEMOTRON_MODEL", "nvidia/llama-3.3-nemotron-super-49b-v1.5")
+# Verified against https://integrate.api.nvidia.com/v1/models (public, no auth).
+# nano-3-30b is the fast default -- this pipeline makes 3 calls per message and
+# demo latency matters. Swap to nemotron-3-super-120b-a12b for quality; the eval
+# takes --model so you can show the comparison.
+NEMOTRON_MODEL = os.getenv("NEMOTRON_MODEL", "nvidia/nemotron-nano-3-30b-a3b")
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")

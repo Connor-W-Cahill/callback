@@ -283,12 +283,14 @@ api("/api/reset", { method: "POST" }).then(load);
 
 // --- "Under the hood": what Nemotron and ElevenLabs actually did -----------
 
+// Keyed in pipeline order: an email is extracted and scored, the agent speaks,
+// the vendor answers, and only then is the transcript judged.
 const JOBS = {
-  extract: ["Extract", "Unstructured email → structured JSON. Nemotron job 1."],
-  score: ["Score", "Weigh the precomputed signals, write the clerk's rationale. Nemotron job 2."],
-  judge: ["Judge", "Read the call transcript → confirmed / denied / unclear. Nemotron job 3, model-as-judge."],
-  tts: ["Text to speech", "Render the agent's question so a human can hear it. ElevenLabs."],
-  stt: ["Speech to text", "Turn what the vendor actually said into words. ElevenLabs."],
+  extract: ["1. Extract", "Unstructured email → structured JSON. Nemotron."],
+  score: ["2. Score", "Weigh the precomputed signals, write the clerk's rationale. Nemotron."],
+  tts: ["3. Speak", "Render the agent's question so a human can hear it. ElevenLabs."],
+  stt: ["4. Listen", "Turn what the vendor actually said into words. ElevenLabs."],
+  judge: ["5. Judge", "Read the transcript → confirmed / denied / unclear. Nemotron, model-as-judge."],
 };
 
 function switchView(view) {
@@ -327,7 +329,7 @@ async function renderEngine() {
         ${summaryTable(el11)}
       </div>
 
-      <h3 style="margin-top:28px">Call log</h3>
+      <h3 style="margin-top:28px">Call log <span class="note">newest first</span></h3>
       <div class="log">${d.calls.length ? d.calls.map(callRow).join("") : '<div class="empty">No calls yet — reset the demo or place a verification call.</div>'}</div>
     </div>`;
 

@@ -175,7 +175,19 @@ return `404 not found for account` despite being in the public catalog;
 the next; `nemotron-3-super-120b-a12b` went from 0.9s to 503 to timeout within
 an hour. Identical requests return clean JSON, truncated bodies, or 503s.
 
-Three mitigations, all in `src/llm.py` and `src/config.py`:
+One class of failure was **ours**, not theirs. The score job was failing about
+half the time with "no JSON object in reply", and the reply text showed why: the
+prompt ended with a bare `Deterministic floor score: 1.0`, never explained, and
+the model spent its entire token budget wondering what that meant instead of
+answering — *"That seems odd: maybe it means that if any signal fires, the score
+is at least 1.0? But s—"* and then it ran out of room. Fixed twice over: that
+line is gone (the floor is enforced in code and the model never needed to know),
+and every job now sends a `json_schema` response format, so decoding is
+constrained to valid JSON and the model cannot deliberate its way out of a reply.
+That failure class went to zero.
+
+Three mitigations for the failures that are genuinely NVIDIA's, in
+`src/llm.py` and `src/config.py`:
 
 - **A model chain** (`NEMOTRON_MODELS`), tried in order, then rules. One dead
   model costs one timeout, not the request.

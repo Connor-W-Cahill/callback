@@ -9,6 +9,16 @@ from dataclasses import dataclass
 from src import llm
 from src.score.features import Signal, base_score
 
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "number"},
+        "rationale": {"type": "string"},
+        "top_signals": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["score", "rationale"],
+}
+
 SYSTEM = """You are the risk engine for an accounts-payable fraud control.
 You are given precomputed signals about an inbound vendor email. Each signal is
 already determined -- do not re-derive them and do not invent new evidence.
@@ -58,7 +68,8 @@ class Assessment:
 def assess(signals: list[Signal], *, vendor: dict | None, extraction) -> Assessment:
     floor = base_score(signals)
     try:
-        data = llm.complete_json(SYSTEM, _prompt(signals, vendor, extraction), job="score")
+        data = llm.complete_json(SYSTEM, _prompt(signals, vendor, extraction),
+                                 job="score", schema=SCHEMA)
         score = float(data.get("score", floor))
         rationale = str(data.get("rationale", "")).strip()
         if not rationale:
@@ -101,6 +112,4 @@ def _prompt(signals: list[Signal], vendor: dict | None, extraction) -> str:
     lines.append("Signals (fired = the condition is true):")
     for s in signals:
         lines.append(f"- {s.key}: fired={s.fired} weight={s.weight} :: {s.detail}")
-    lines.append("")
-    lines.append(f"Deterministic floor score: {base_score(signals)}")
     return "\n".join(lines)

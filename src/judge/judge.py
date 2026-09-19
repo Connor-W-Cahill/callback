@@ -41,6 +41,17 @@ UNCLEAR_CUES = [
 ]
 
 
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "judgment": {"type": "string", "enum": ["confirmed", "denied", "unclear"]},
+        "quote": {"type": "string"},
+        "reasoning": {"type": "string"},
+    },
+    "required": ["judgment", "quote", "reasoning"],
+}
+
+
 @dataclass
 class Judgment:
     judgment: str
@@ -51,7 +62,8 @@ class Judgment:
 
 def judge(transcript: str) -> Judgment:
     try:
-        data = llm.complete_json(SYSTEM, f"Transcript:\n\n{transcript}", job="judge")
+        data = llm.complete_json(SYSTEM, f"Transcript:\n\n{transcript}",
+                                 job="judge", schema=SCHEMA)
         j = str(data.get("judgment", "")).lower().strip()
         if j not in ("confirmed", "denied", "unclear"):
             raise llm.LLMUnavailable(f"bad judgment {j!r}")

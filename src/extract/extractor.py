@@ -29,6 +29,23 @@ discourages_verification is true if the message discourages calling, says the se
 is unavailable by phone, or asks to handle it only over email.
 Use null when a field is genuinely absent. Do not invent values."""
 
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "vendor_name": {"type": ["string", "null"]},
+        "invoice_number": {"type": ["string", "null"]},
+        "amount": {"type": ["number", "null"]},
+        "due_date": {"type": ["string", "null"]},
+        "bank_account": {"type": ["string", "null"]},
+        "bank_routing": {"type": ["string", "null"]},
+        "bank_country": {"type": ["string", "null"]},
+        "requests_payment_change": {"type": "boolean"},
+        "discourages_verification": {"type": "boolean"},
+        "urgency": {"type": "string", "enum": ["none", "low", "high"]},
+    },
+    "required": ["requests_payment_change", "discourages_verification", "urgency"],
+}
+
 ACCOUNT_RE = re.compile(r"(?:acct|account)\D{0,20}(\d[\d\s-]{6,19}\d)", re.I)
 ROUTING_RE = re.compile(r"(?:routing|aba|rtn)\D{0,20}(\d{9})", re.I)
 AMOUNT_RE = re.compile(r"\$\s?([\d,]+\.\d{2}|[\d,]+)")
@@ -76,7 +93,7 @@ def extract(message: dict) -> Extraction:
     """Extract with Nemotron, falling back to rules on any failure."""
     text = _message_text(message)
     try:
-        data = llm.complete_json(SYSTEM, text, job="extract")
+        data = llm.complete_json(SYSTEM, text, job="extract", schema=SCHEMA)
         return _from_model(data)
     except llm.LLMUnavailable:
         return extract_rules(message)

@@ -187,6 +187,12 @@ def run_verification(hold_id: str, scripted_reply: str | None = None):
         raise HTTPException(400, str(e)) from None
 
 
+# The order the pipeline actually runs in. Sorting these alphabetically put
+# "judge" before "score", which reads as though we judge the call before we
+# score the email -- backwards, and the page exists to explain the pipeline.
+PIPELINE_ORDER = {"extract": 0, "score": 1, "tts": 2, "stt": 3, "judge": 4}
+
+
 @app.get("/api/activity")
 def activity():
     """Every external service call, so a judge can see the models actually working."""
@@ -211,7 +217,7 @@ def activity():
     tts_chars = sum(r["units"] or 0 for r in rows if r["job"] == "tts" and r["ok"])
     return {
         "calls": rows,
-        "summary": sorted(agg.values(), key=lambda a: (a["service"], a["job"])),
+        "summary": sorted(agg.values(), key=lambda a: PIPELINE_ORDER.get(a["job"], 99)),
         "config": {
             "nemotron_chain": config.NEMOTRON_MODELS,
             "nemotron_live": config.have_nemotron(),

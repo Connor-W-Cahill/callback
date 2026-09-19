@@ -58,12 +58,19 @@ RETRIES = int(os.getenv("LLM_RETRIES", "2"))
 
 
 def complete_json(system: str, user: str, *, temperature: float = 0.0,
-                  max_tokens: int = 900, job: str = "call") -> dict[str, Any]:
-    """Call Nemotron and parse a JSON object out of the reply."""
+                  max_tokens: int = 900, job: str = "call",
+                  schema: dict | None = None) -> dict[str, Any]:
+    """Call Nemotron and parse a JSON object out of the reply.
+
+    With a schema, the server constrains decoding to valid JSON. Without one,
+    a reasoning model will happily deliberate in prose until it hits the token
+    ceiling and returns no JSON at all -- which was our single largest source
+    of failures on the score job.
+    """
     if not config.have_nemotron():
         raise LLMUnavailable("NVIDIA_API_KEY not set")
 
-    payload = {
+    payload: dict[str, Any] = {
         "model": config.NEMOTRON_MODEL,
         "messages": [
             {"role": "system", "content": system},
@@ -72,6 +79,11 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if schema:
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": job, "schema": schema},
+        }
 
     STATS.attempts += 1
     last = "unknown"
@@ -106,6 +118,11 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
                 return out
             except Exception as e:  # noqa: BLE001 - transient; retry, then next model
                 last = f"{type(e).__name__} on {model.split('/')[-1]}: {e}"
+                # Some models reject response_format outright. Drop it and let
+                # the next attempt fall back to prose parsing.
+                if "response_format" in payload and isinstance(e, httpx.HTTPStatusError) \
+                        and e.response.status_code == 400:
+                    payload.pop("response_format", None)
                 telemetry.record(
                     service="nemotron", job=job, model=model, ok=False,
                     ms=int((time.time() - t0) * 1000), detail=last,

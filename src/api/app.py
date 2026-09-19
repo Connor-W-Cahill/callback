@@ -1,6 +1,7 @@
 """Backend for the AP clerk's hold queue."""
 import base64
 import json
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -11,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src import config, db, llm, telemetry
 from src.extract import extractor
-from src.ingest import inbox
+from src.ingest import inbox, poller
 from src.pipeline import process, verify
 from src.voice import agent as voice
 
@@ -48,6 +49,25 @@ def _ensure_seeded(c) -> None:
                 process(c, m)
             except Exception:  # noqa: BLE001 - a bad message must not brick the page
                 continue
+
+
+@app.on_event("startup")
+def _start_poller() -> None:
+    # Serverless has no long-lived process to poll from; the email demo is local.
+    if not config.SERVERLESS and os.getenv("CALLBACK_EMAIL", "1") != "0":
+        poller.start()
+
+
+@app.get("/api/mailbox")
+def mailbox_status():
+    """The address to email, and whether the poller is alive."""
+    st = poller.state()
+    c = conn()
+    st["received"] = c.execute(
+        "SELECT COUNT(*) FROM message WHERE id LIKE 'mail-%'"
+    ).fetchone()[0]
+    st["poll_seconds"] = poller.POLL_SECONDS
+    return st
 
 
 @app.get("/api/status")

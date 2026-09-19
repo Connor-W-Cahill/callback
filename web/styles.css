@@ -146,3 +146,22 @@ table.sum td.desc { color: var(--dim); max-width: 340px; }
 .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--danger); margin-right: 6px; animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+
+/* --- live inbox bar --- */
+.mailbar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 22px;
+  background: #12291b; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.mailbar.flash { animation: flashbar 1.2s ease; }
+@keyframes flashbar { 0%, 100% { background: #12291b } 30% { background: #1d4a2e } }
+.mailbar code {
+  background: #0b1410; border: 1px solid #2c5c3c; color: var(--ok);
+  padding: 4px 10px; border-radius: 5px; font-size: 14px; font-weight: 600;
+  font-family: ui-monospace, monospace; user-select: all;
+}
+.mailbar .grow { flex: 1; }
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--ok);
+  animation: pulse 2s infinite;
+}
+main, .engine { height: calc(100vh - 61px - 41px); }

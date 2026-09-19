@@ -16,3 +16,4 @@ data/*.json
 recordings/
 public/
 .vercel
+data/mailbox.json

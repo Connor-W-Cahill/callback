@@ -10,6 +10,40 @@ async function api(path, opts) {
   return r.json();
 }
 
+async function loadMailbox() {
+  let m;
+  try {
+    m = await api("/api/mailbox");
+  } catch (e) {
+    return;
+  }
+  const bar = $("#mailbar");
+  if (!m.address) {
+    if (m.error) {
+      bar.hidden = false;
+      bar.innerHTML = `<span class="fail">Inbox unavailable: ${escapeHtml(m.error)}</span>`;
+    }
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML = `
+    <span class="live-dot"></span>
+    <span>Live inbox — email this address and it lands in the queue:</span>
+    <code id="mailaddr">${escapeHtml(m.address)}</code>
+    <button id="copyaddr" class="ghost">Copy</button>
+    <span class="grow"></span>
+    <span class="dim">${m.received} received · checking every ${m.poll_seconds}s</span>`;
+  $("#copyaddr").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(m.address);
+      $("#copyaddr").textContent = "Copied";
+      setTimeout(() => ($("#copyaddr").textContent = "Copy"), 1500);
+    } catch (e) {
+      /* clipboard blocked; the address is on screen anyway */
+    }
+  });
+}
+
 async function loadStatus() {
   const s = await api("/api/status");
   $("#status").textContent = `nemotron: ${s.nemotron} · voice: ${s.elevenlabs}`;
@@ -285,6 +319,7 @@ $("#reset").addEventListener("click", async () => {
 // still there for a deliberate re-run.
 async function boot() {
   await loadStatus();
+  await loadMailbox();
   try {
     const holds = await api("/api/holds");
     if (!holds.length) await api("/api/reset", { method: "POST" });
@@ -295,6 +330,19 @@ async function boot() {
 }
 
 boot();
+
+// New mail arrives on its own schedule, so the queue has to notice.
+setInterval(async () => {
+  if (!$("#view-engine").hidden) return;
+  const before = holds.length;
+  await loadMailbox();
+  await load();
+  if (holds.length > before) {
+    const bar = $("#mailbar");
+    bar.classList.add("flash");
+    setTimeout(() => bar.classList.remove("flash"), 1200);
+  }
+}, 5000);
 
 
 // --- "Under the hood": what Nemotron and ElevenLabs actually did -----------

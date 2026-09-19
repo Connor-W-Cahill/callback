@@ -1,0 +1,7 @@
+{
+  "denial": "Wait, no. We never sent that. Our banking hasn't changed in six years, it's the same Dollar Bank account you've always paid. Please don't send anything to that account.",
+  "routine": "Yes, that's our account, nothing has changed on our end. Thanks for checking.",
+  "confirm_change": "Yes, that was us. We switched banks last month and sent the notice to your accounts payable address. The new account is correct.",
+  "hedge": "Uh, I'd have to check with our controller on that. I'm new here. Can you email me the details?",
+  "voicemail": "You've reached the accounts receivable desk. Please leave a message after the tone."
+}

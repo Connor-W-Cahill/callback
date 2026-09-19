@@ -1,0 +1,22 @@
+[
+  {"id": "t-01", "label": "denied", "transcript": "AGENT: We received a request to change your bank account.\nVENDOR: Wait, no. We never sent that. Our banking hasn't changed in six years."},
+  {"id": "t-02", "label": "denied", "transcript": "AGENT: Did your company send that request?\nVENDOR: That's not our account. Definitely wasn't us."},
+  {"id": "t-03", "label": "denied", "transcript": "AGENT: Can you confirm the change?\nVENDOR: No idea what you're talking about. We haven't changed anything."},
+  {"id": "t-04", "label": "denied", "transcript": "AGENT: An account ending 2290 was requested.\nVENDOR: No change on our end, still the same Dollar Bank account."},
+  {"id": "t-05", "label": "denied", "transcript": "AGENT: Please confirm.\nVENDOR: We did not send that. Sounds like fraud honestly, you should report it."},
+  {"id": "t-06", "label": "confirmed", "transcript": "AGENT: Did your company send that request?\nVENDOR: Yes we sent that, we switched banks last month. The new account is correct."},
+  {"id": "t-07", "label": "confirmed", "transcript": "AGENT: Can you confirm the new details?\nVENDOR: That's correct, we changed our bank in August. Account ending 0033."},
+  {"id": "t-08", "label": "confirmed", "transcript": "AGENT: Was this change sent by you?\nVENDOR: That was us, yes. Our controller mailed the notice two weeks ago."},
+  {"id": "t-09", "label": "confirmed", "transcript": "AGENT: Please verify.\nVENDOR: Yes that's right, we moved to First National. Everything else is unchanged."},
+  {"id": "t-10", "label": "unclear", "transcript": "AGENT: Did your company send that request?\nVENDOR: Uh, I'd have to check with our controller. I'm new here."},
+  {"id": "t-11", "label": "unclear", "transcript": "AGENT: Can you confirm?\nVENDOR: You've reached the accounts receivable desk. Please leave a message after the tone."},
+  {"id": "t-12", "label": "unclear", "transcript": "AGENT: We need to verify a bank change.\nVENDOR: I'm not sure, can you email me the details and I'll look into it?"},
+  {"id": "t-13", "label": "unclear", "transcript": "AGENT: Is this Keystone Refrigerant?\nVENDOR: Wrong number, there's nobody here by that name."},
+  {"id": "t-14", "label": "unclear", "transcript": "AGENT: Did you request the change?\nVENDOR: I think so? Someone in finance mentioned something. Let me look into it."},
+  {"id": "t-15", "label": "unclear", "transcript": "AGENT: Please confirm the account ending 8841.\nVENDOR: Marty's out today and he handles all that. Call back Monday."},
+  {"id": "t-16", "label": "denied", "transcript": "AGENT: A change to account 6041882290 was requested.\nVENDOR: That's not our account number. Ours ends 3392 and always has."},
+  {"id": "t-17", "label": "confirmed", "transcript": "AGENT: Confirming the switch.\nVENDOR: Confirm, yes. We sent that notice on the first."},
+  {"id": "t-18", "label": "unclear", "transcript": "AGENT: Hello, calling to verify a banking change.\nVENDOR: Hello? Hello? I can't hear you, the line is terrible."},
+  {"id": "t-19", "label": "denied", "transcript": "AGENT: Please confirm.\nVENDOR: Absolutely not, we never sent any such request. Do not pay that."},
+  {"id": "t-20", "label": "unclear", "transcript": "AGENT: Did you send a bank change request?\nVENDOR: Possibly, our AR person handles email. I'd have to check."}
+]

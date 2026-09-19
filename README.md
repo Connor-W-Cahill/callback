@@ -65,6 +65,62 @@ evals/transcripts/  labeled synthetic call transcripts
 All synthetic. No real account numbers, credentials, or financial records — required by the Compound
 track rules and a good idea regardless.
 
+## Running it
+
+No API keys required. Every external call has a deterministic offline fallback,
+so the pipeline runs end to end on a laptop with no network.
+
+```bash
+uv venv && uv pip install fastapi 'uvicorn[standard]' httpx python-dotenv
+./run.sh            # http://localhost:8000
+```
+
+To go live, copy `.env.example` to `.env` and fill in `NVIDIA_API_KEY` (Nemotron)
+and `ELEVENLABS_API_KEY` (voice). The banner in the UI shows which mode each is in.
+
+```bash
+python evals/run_eval.py      # both evals, prints the numbers for the slide
+python evals/generate_cases.py    # regenerate the labeled email set
+python data/seed/generate_history.py   # regenerate payment history
+```
+
+## Eval results
+
+79 labeled synthetic emails, 20 labeled call transcripts. Rules-only condition
+(no `NVIDIA_API_KEY` set):
+
+| Metric | Result |
+| --- | --- |
+| Fraud precision | 100% (0 false positives) |
+| Fraud recall | 75% (24/32) |
+| Lookalike-domain fraud caught | 24/24 |
+| Compromised-mailbox fraud caught *by score* | **0/8** |
+| Fraud that escaped the hold entirely | **0** |
+| Legitimate changes held for a call | 15 (cost: one phone call each) |
+| Routine invoices wrongly held | 0 |
+| Transcript judge accuracy | 100% (20/20), 0 denials misread as confirmations |
+
+**The interesting finding.** The risk score is blind to the hard case. When a
+vendor's real mailbox is compromised, the sender is genuine, the domain is
+genuine, and every domain-based signal is silent — score-based detection catches
+0 of 8. None of them got through anyway, because holding a payment-detail change
+is *policy*, not a threshold. The score decides how loudly to shout; it never
+decides whether to verify. That separation is the whole design, and the eval is
+what proves it matters.
+
+**Caveat worth stating out loud:** the transcript set is small and was written
+alongside the judge's cues, so 100% there reflects an absence of hard cases more
+than a strong result. Expanding it with adversarial transcripts is the obvious
+next step.
+
+## Known bug found by the eval
+
+Case `t-15` exposed a real defect: the rules judge scanned the entire transcript,
+including the agent's own script, which contains the word "confirm". The agent
+was answering its own question. Fixed in `src/judge/judge.py` by restricting the
+scan to `VENDOR:` turns.
+
 ## Status
 
-Scaffold. See the planning doc for scope, build order, and the demo script.
+Working end to end. Pipeline, API, UI, and both evals run. Not built: live IMAP,
+auth, real payment rails, PDF OCR.

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "msg-001",
+    "received_at": "2026-09-19T08:12:00Z",
+    "sender": "invoices@mon-supply.com",
+    "reply_to": "invoices@mon-supply.com",
+    "claimed_vendor": "Monongahela Supply Co",
+    "subject": "Invoice INV-4512",
+    "body": "Hi Dana,\n\nAttached is this month's invoice, INV-4512, for $2,140.00, net 30.\n\nSame remit-to as always: account 2290117845, routing 043318092.\n\nThanks,\nRaul Ortiz\nMonongahela Supply Co",
+    "demo_role": "happy_path"
+  },
+  {
+    "id": "msg-002",
+    "received_at": "2026-09-19T09:41:00Z",
+    "sender": "d.perkins@alleghenysheetrnetal.com",
+    "reply_to": "accounts.receivable.dept@mail.com",
+    "claimed_vendor": "Allegheny Sheet Metal",
+    "subject": "RE: Updated remittance details - action needed today",
+    "body": "Dana,\n\nFollowing our banking migration our remittance details have changed. Please update your records before the next run so we avoid late fees.\n\nNew account: 6041882290\nRouting: 026009593\n\nInvoice INV-4530 for $9,180.00 is due and should go to the new account.\n\nI'm in meetings all day and unable to take calls, so please just confirm by email.\n\nRegards,\nDenise Perkins\nAllegheny Sheet Metal",
+    "demo_role": "the_attack"
+  },
+  {
+    "id": "msg-003",
+    "received_at": "2026-09-19T10:05:00Z",
+    "sender": "ar@keystonerefrigerant.com",
+    "reply_to": "ar@keystonerefrigerant.com",
+    "claimed_vendor": "Keystone Refrigerant Partners",
+    "subject": "Bank change notice - Keystone Refrigerant",
+    "body": "Hello,\n\nWe've switched banks. Effective immediately please remit to account 4417820033, routing 031201360.\n\nOur next invoice INV-4535 is $6,300.00. Call me if you need to verify, I'm at the usual number.\n\nMarty Vance\nKeystone Refrigerant Partners",
+    "demo_role": "legitimate_change"
+  },
+  {
+    "id": "msg-004",
+    "received_at": "2026-09-19T11:20:00Z",
+    "sender": "ar@steelcityuniform.com",
+    "reply_to": "ar@steelcityuniform.com",
+    "claimed_vendor": "Steel City Uniform & Linen",
+    "subject": "September linen service INV-4541",
+    "body": "Monthly linen service for September, INV-4541, $412.00. Remit to account 3318820046, routing 043318092 as usual.\n\nYvonne Cho",
+    "demo_role": "happy_path"
+  }
+]

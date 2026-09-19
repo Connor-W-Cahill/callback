@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Callback — AP Hold Queue</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Callback</h1>
+    <span class="tag">Accounts Payable — Hold Queue</span>
+  </div>
+  <div class="right">
+    <span id="status" class="status"></span>
+    <button id="reset" class="ghost">Reset demo</button>
+  </div>
+</header>
+
+<main>
+  <section id="queue" class="queue">
+    <h2>Held payments <span id="count" class="count"></span></h2>
+    <div id="holds"></div>
+    <div id="cleared" class="cleared"></div>
+  </section>
+
+  <section id="detail" class="detail">
+    <div class="empty">Select a held payment to see why it was stopped.</div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

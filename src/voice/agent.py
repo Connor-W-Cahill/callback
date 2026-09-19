@@ -4,10 +4,12 @@ The security property lives here: we dial the number from the VENDOR MASTER,
 never a number supplied in the email. The email is the compromised channel, so
 verification has to leave it.
 
-Three modes, chosen by what is configured:
-  live      -- ElevenLabs TTS renders the agent's side, STT transcribes the reply
-  simulated -- deterministic scripted vendor, no network (default with no key)
-Both produce the same transcript shape, so the judge downstream cannot tell.
+How the vendor's side is captured, in descending order of realism:
+  spoken    -- a human speaks into a mic, ElevenLabs STT transcribes it (option 2)
+  typed     -- a human types the reply; used when no key is set
+  scripted  -- canned reply from the seed data, for a deterministic demo run
+All three produce the same transcript shape, so the judge downstream cannot tell
+how the words were captured -- which is what makes the fallbacks safe.
 """
 import json
 from dataclasses import dataclass
@@ -41,24 +43,32 @@ def script_for(vendor: dict, extraction) -> str:
     )
 
 
-def place_call(vendor: dict, extraction, *, scripted_reply: str | None = None) -> CallResult:
-    """Place the verification call. Falls back to simulation without a key."""
+def place_call(
+    vendor: dict,
+    extraction,
+    *,
+    scripted_reply: str | None = None,
+    reply_source: str = "scripted",
+) -> CallResult:
+    """Assemble the verification call. Renders the agent's side if a key is set."""
     number = vendor["phone_on_file"]  # never from the email. This is the control.
     agent_line = script_for(vendor, extraction)
     reply = scripted_reply if scripted_reply is not None else _default_reply(vendor, extraction)
 
     audio_path = None
-    mode = "simulated"
     if config.have_elevenlabs():
         try:
-            audio_path = synthesize(agent_line, vendor["id"])
-            mode = "live_tts"
+            audio_path = synthesize(agent_line, f"agent-{vendor['id']}")
         except Exception:  # noqa: BLE001 - a failed render must not kill the call
             audio_path = None
-            mode = "simulated"
 
     transcript = f"AGENT: {agent_line}\nVENDOR: {reply}"
-    return CallResult(dialed_number=number, transcript=transcript, audio_path=audio_path, mode=mode)
+    return CallResult(
+        dialed_number=number,
+        transcript=transcript,
+        audio_path=audio_path,
+        mode=reply_source,
+    )
 
 
 def synthesize(text: str, tag: str) -> str:
@@ -76,20 +86,45 @@ def synthesize(text: str, tag: str) -> str:
     return str(out.relative_to(config.ROOT))
 
 
-def transcribe(audio_path: str) -> str:
-    """Transcribe the vendor's side via ElevenLabs STT."""
+class STTUnavailable(RuntimeError):
+    """Raised when we cannot turn the vendor's audio into words."""
+
+
+def transcribe(data: bytes, filename: str = "reply.webm", *, keep_as: str | None = None) -> tuple[str, str | None]:
+    """Transcribe the vendor's spoken reply via ElevenLabs STT.
+
+    Returns (text, saved_audio_path). The audio is kept so the clerk -- and the
+    judges -- can replay exactly what was said.
+    """
     if not config.have_elevenlabs():
-        raise RuntimeError("ELEVENLABS_API_KEY not set")
-    with open(audio_path, "rb") as fh:
+        raise STTUnavailable("ELEVENLABS_API_KEY not set")
+    if not data:
+        raise STTUnavailable("no audio received")
+
+    saved = None
+    if keep_as:
+        config.RECORDINGS.mkdir(parents=True, exist_ok=True)
+        suffix = Path(filename).suffix or ".webm"
+        out = config.RECORDINGS / f"{keep_as}{suffix}"
+        out.write_bytes(data)
+        saved = str(out.relative_to(config.ROOT))
+
+    try:
         r = httpx.post(
             STT_URL,
             headers={"xi-api-key": config.ELEVENLABS_API_KEY},
-            files={"file": fh},
+            files={"file": (filename, data)},
             data={"model_id": "scribe_v1"},
             timeout=120.0,
         )
-    r.raise_for_status()
-    return r.json().get("text", "")
+        r.raise_for_status()
+    except httpx.HTTPError as e:
+        raise STTUnavailable(f"speech-to-text failed: {e}") from e
+
+    text = (r.json() or {}).get("text", "").strip()
+    if not text:
+        raise STTUnavailable("speech-to-text returned no words")
+    return text, saved
 
 
 def _default_reply(vendor: dict, extraction) -> str:

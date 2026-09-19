@@ -83,8 +83,21 @@ def process(conn: sqlite3.Connection, message: dict, *, use_llm: bool = True) ->
     return Decision(message["id"], vendor, ex, sig, assessment, held, reason, hold_id)
 
 
-def verify(conn: sqlite3.Connection, hold_id: str, *, scripted_reply: str | None = None) -> dict:
-    """Place the callback for a held payment and judge what the vendor said."""
+def verify(
+    conn: sqlite3.Connection,
+    hold_id: str,
+    *,
+    scripted_reply: str | None = None,
+    reply_audio: bytes | None = None,
+    audio_filename: str = "reply.webm",
+) -> dict:
+    """Place the callback for a held payment and judge what the vendor said.
+
+    The vendor's side can arrive three ways, all ending in the same transcript:
+      reply_audio     -- a human spoke; ElevenLabs STT turns it into words
+      scripted_reply  -- a human typed it, or the demo supplied a canned line
+      neither         -- the deterministic seeded reply
+    """
     hold = conn.execute("SELECT * FROM hold WHERE id=?", (hold_id,)).fetchone()
     if hold is None:
         raise KeyError(hold_id)
@@ -96,14 +109,27 @@ def verify(conn: sqlite3.Connection, hold_id: str, *, scripted_reply: str | None
     vrow = conn.execute("SELECT * FROM vendor WHERE id=?", (hold["vendor_id"],)).fetchone()
     vendor = dict(vrow)
 
-    call = voice.place_call(vendor, ex, scripted_reply=scripted_reply)
+    reply_audio_path = None
+    reply_source = "scripted"
+    if reply_audio is not None:
+        # A real human just spoke. This is the whole point: the words the judge
+        # reads were never written down by us.
+        scripted_reply, reply_audio_path = voice.transcribe(
+            reply_audio, audio_filename, keep_as=f"vendor-{hold_id}"
+        )
+        reply_source = "spoken"
+    elif scripted_reply is not None:
+        reply_source = "typed"
+
+    call = voice.place_call(vendor, ex, scripted_reply=scripted_reply, reply_source=reply_source)
     verdict = judging.judge(call.transcript)
 
     vid = f"ver-{uuid.uuid4().hex[:8]}"
     conn.execute(
         """INSERT INTO verification
-           (id, hold_id, dialed_number, transcript, audio_path, judgment, judge_quote, judge_reasoning, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
+           (id, hold_id, dialed_number, transcript, audio_path, judgment, judge_quote,
+            judge_reasoning, reply_audio_path, reply_source, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
         (
             vid,
             hold_id,
@@ -113,6 +139,8 @@ def verify(conn: sqlite3.Connection, hold_id: str, *, scripted_reply: str | None
             verdict.judgment,
             verdict.quote,
             verdict.reasoning,
+            reply_audio_path,
+            reply_source,
             _now(),
         ),
     )
@@ -126,7 +154,8 @@ def verify(conn: sqlite3.Connection, hold_id: str, *, scripted_reply: str | None
         "voice_agent",
         f"callback_{verdict.judgment}",
         hold_id,
-        f"dialed {call.dialed_number} (on-file number); {verdict.reasoning}",
+        f"dialed {call.dialed_number} (on-file number); reply captured via "
+        f"{reply_source}; {verdict.reasoning}",
     )
 
     # A confirmed change is the only path that writes to the vendor master.
@@ -144,6 +173,8 @@ def verify(conn: sqlite3.Connection, hold_id: str, *, scripted_reply: str | None
         "mode": call.mode,
         "transcript": call.transcript,
         "audio_path": call.audio_path,
+        "reply_audio_path": reply_audio_path,
+        "reply_source": reply_source,
         "judgment": verdict.judgment,
         "quote": verdict.quote,
         "reasoning": verdict.reasoning,

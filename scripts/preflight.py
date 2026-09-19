@@ -38,19 +38,37 @@ def check_nemotron() -> bool:
             return False
     except Exception as e:
         bad(f"could not read model catalog: {e}")
+        ids = []
 
-    try:
-        from src import llm
-        out = llm.complete_json(
-            'Reply with only JSON.',
-            'Return {"ok": true} and nothing else.',
-            max_tokens=200,
-        )
-        ok(f"live call succeeded, parsed: {out}")
+    from src import llm
+
+    def try_model(model: str) -> bool:
+        config.NEMOTRON_MODEL = model
+        try:
+            out = llm.complete_json(
+                "Reply with only JSON.",
+                'Return {"ok": true} and nothing else.',
+                max_tokens=200,
+            )
+            ok(f"live call succeeded with {model}, parsed: {out}")
+            return True
+        except Exception as e:
+            bad(f"{model} failed: {str(e)[:110]}")
+            return False
+
+    if try_model(config.NEMOTRON_MODEL):
         return True
-    except Exception as e:
-        bad(f"live call failed: {e}")
-        return False
+
+    # Catalog membership does not imply access: most ids 404 per-account.
+    print("  trying other nemotron models on the catalog...")
+    for m in [i for i in ids if "nemotron" in i and "embed" not in i
+              and "parse" not in i and "safety" not in i and "reward" not in i][:6]:
+        if m == config.NEMOTRON_MODEL:
+            continue
+        if try_model(m):
+            print(f"\n  \033[33m→ set NEMOTRON_MODEL={m} in your .env\033[0m")
+            return True
+    return False
 
 
 def check_elevenlabs() -> bool:
@@ -113,6 +131,6 @@ if __name__ == "__main__":
     elif n or e:
         print("Partially live. The missing service falls back automatically.")
     else:
-        print("Neither key set. Everything runs on deterministic fallbacks --")
+        print("No service is live. Everything runs on deterministic fallbacks --")
         print("the demo still works end to end, just without live models.")
     print("=" * 60)

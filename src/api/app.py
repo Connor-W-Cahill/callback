@@ -2,13 +2,15 @@
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import config, db
+from src.extract import extractor
 from src.ingest import inbox
 from src.pipeline import process, verify
+from src.voice import agent as voice
 
 app = FastAPI(title="Callback", description="Vendor payment-change fraud interceptor")
 WEB = config.ROOT / "web"
@@ -95,8 +97,67 @@ def hold_detail(hold_id: str):
     return d
 
 
+@app.post("/api/holds/{hold_id}/call")
+def open_call(hold_id: str):
+    """Start the callback: render the agent's question so the clerk can hear it.
+
+    Returns the number we will dial and, with a key set, audio of the agent
+    speaking. The vendor's reply is submitted separately to /reply.
+    """
+    c = conn()
+    hold = c.execute("SELECT * FROM hold WHERE id=?", (hold_id,)).fetchone()
+    if hold is None:
+        raise HTTPException(404, "no such hold")
+    if not hold["vendor_id"]:
+        raise HTTPException(400, "cannot verify: no vendor on file to call")
+
+    vendor = dict(c.execute("SELECT * FROM vendor WHERE id=?", (hold["vendor_id"],)).fetchone())
+    msg = c.execute("SELECT extracted FROM message WHERE id=?", (hold["message_id"],)).fetchone()
+    ex = extractor.Extraction(**json.loads(msg["extracted"]))
+
+    line = voice.script_for(vendor, ex)
+    audio = None
+    if config.have_elevenlabs():
+        try:
+            audio = voice.synthesize(line, f"agent-{vendor['id']}")
+        except Exception:  # noqa: BLE001 - the clerk can still read the line
+            audio = None
+
+    return {
+        "dialed_number": vendor["phone_on_file"],
+        "contact_name": vendor["contact_name"],
+        "agent_line": line,
+        "agent_audio": audio,
+        "stt_available": config.have_elevenlabs(),
+    }
+
+
+@app.post("/api/holds/{hold_id}/reply")
+async def submit_reply(
+    hold_id: str,
+    audio: UploadFile | None = File(default=None),
+    text: str | None = Form(default=None),
+):
+    """Submit the vendor's side of the call, spoken or typed, and judge it."""
+    c = conn()
+    data = await audio.read() if audio is not None else None
+    try:
+        if data:
+            return verify(c, hold_id, reply_audio=data, audio_filename=audio.filename or "reply.webm")
+        if text and text.strip():
+            return verify(c, hold_id, scripted_reply=text.strip())
+        return verify(c, hold_id)  # deterministic seeded reply
+    except KeyError:
+        raise HTTPException(404, "no such hold") from None
+    except voice.STTUnavailable as e:
+        raise HTTPException(422, f"could not transcribe: {e}") from None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+
 @app.post("/api/holds/{hold_id}/verify")
 def run_verification(hold_id: str, scripted_reply: str | None = None):
+    """One-shot verification with the seeded reply. Kept for the scripted demo path."""
     c = conn()
     try:
         return verify(c, hold_id, scripted_reply=scripted_reply)
@@ -117,7 +178,8 @@ def recording(name: str):
     path = config.RECORDINGS / Path(name).name
     if not path.exists():
         raise HTTPException(404, "no recording")
-    return FileResponse(path, media_type="audio/mpeg")
+    media = "audio/webm" if path.suffix in (".webm", ".ogg") else "audio/mpeg"
+    return FileResponse(path, media_type=media)
 
 
 if WEB.exists():

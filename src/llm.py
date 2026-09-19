@@ -9,7 +9,10 @@ Every call goes through `complete_json`, which returns parsed JSON or raises.
 Callers are expected to have a deterministic fallback; see each module.
 """
 import json
+import os
 import re
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -19,6 +22,37 @@ from src import config
 
 class LLMUnavailable(RuntimeError):
     pass
+
+
+@dataclass
+class Stats:
+    """Call outcomes, so a 'rules + Nemotron' claim cannot silently be rules.
+
+    NVIDIA's free tier returns 503s and truncated bodies under load. Without
+    counting, a fallback looks exactly like a model that agreed with the rules.
+    """
+    attempts: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    reasons: dict = field(default_factory=dict)
+
+    def note_fail(self, why: str) -> None:
+        self.failed += 1
+        key = why.split(":")[0][:48]
+        self.reasons[key] = self.reasons.get(key, 0) + 1
+
+    def reset(self) -> None:
+        self.attempts = self.succeeded = self.failed = 0
+        self.reasons = {}
+
+    @property
+    def fallback_rate(self) -> float:
+        total = self.succeeded + self.failed
+        return self.failed / total if total else 0.0
+
+
+STATS = Stats()
+RETRIES = int(os.getenv("LLM_RETRIES", "2"))
 
 
 def complete_json(system: str, user: str, *, temperature: float = 0.0, max_tokens: int = 900) -> dict[str, Any]:
@@ -35,19 +69,28 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0, max_token
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    try:
-        r = httpx.post(
-            f"{config.NVIDIA_BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {config.NVIDIA_API_KEY}"},
-            json=payload,
-            timeout=45.0,
-        )
-        r.raise_for_status()
-        text = r.json()["choices"][0]["message"]["content"]
-    except Exception as e:  # noqa: BLE001 - any failure falls back to rules
-        raise LLMUnavailable(str(e)) from e
 
-    return _parse_json(text)
+    STATS.attempts += 1
+    last = "unknown"
+    for attempt in range(RETRIES + 1):
+        try:
+            r = httpx.post(
+                f"{config.NVIDIA_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {config.NVIDIA_API_KEY}"},
+                json=payload,
+                timeout=float(config.LLM_TIMEOUT),
+            )
+            r.raise_for_status()
+            out = _parse_json(r.json()["choices"][0]["message"]["content"])
+            STATS.succeeded += 1
+            return out
+        except Exception as e:  # noqa: BLE001 - transient; retry then fall back
+            last = f"{type(e).__name__}: {e}"
+            if attempt < RETRIES:
+                time.sleep(0.6 * (2 ** attempt))
+
+    STATS.note_fail(last)
+    raise LLMUnavailable(last)
 
 
 def _parse_json(text: str) -> dict[str, Any]:

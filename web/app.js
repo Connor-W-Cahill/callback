@@ -74,10 +74,11 @@ async function showDetail(id) {
     ${
       ver
         ? renderVerification(ver)
-        : `<div class="block">
+        : `<div class="block" id="callblock">
              <h4>Verification</h4>
-             <div class="dial">We will dial <b>${d.phone_on_file}</b> — the number on file for this vendor,
-               not a number from the email.</div>
+             <div class="dial">We will dial <b>${d.phone_on_file}</b>${
+               d.contact_name ? ` (${d.contact_name})` : ""
+             } — the number on file for this vendor, not a number from the email.</div>
              <button id="call">Place verification call</button>
              <div class="note">The email is the channel under attack, so the check has to leave it.</div>
            </div>`
@@ -89,14 +90,99 @@ async function showDetail(id) {
     </div>`;
 
   const btn = $("#call");
-  if (btn)
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      btn.textContent = "Dialling…";
-      await api(`/api/holds/${id}/verify`, { method: "POST" });
-      await load();
-      await showDetail(id);
-    });
+  if (btn) btn.addEventListener("click", () => openCall(id));
+}
+
+// --- the call: agent speaks, then a human answers ------------------------
+
+let recorder = null;
+let chunks = [];
+
+async function openCall(id) {
+  const btn = $("#call");
+  btn.disabled = true;
+  btn.textContent = "Dialling…";
+  const call = await api(`/api/holds/${id}/call`, { method: "POST" });
+
+  $("#callblock").innerHTML = `
+    <h4>Call in progress</h4>
+    <div class="dial">Ringing <b>${call.dialed_number}</b>${
+      call.contact_name ? ` — ${call.contact_name}` : ""
+    }, the number on file. Not a number from the email.</div>
+    <div class="transcript"><span class="agent">AGENT:</span> ${escapeHtml(call.agent_line)}</div>
+    ${call.agent_audio ? `<audio controls autoplay src="/api/recording/${call.agent_audio.split("/").pop()}"></audio>` : ""}
+    <div class="answer">
+      <h4 style="margin-top:18px">The vendor answers</h4>
+      ${
+        call.stt_available
+          ? `<button id="rec">● Hold the mic — record the reply</button>
+             <span id="recstate" class="note" style="margin-left:10px"></span>`
+          : `<div class="note" style="margin-bottom:10px">No ELEVENLABS_API_KEY set, so speech-to-text is
+             unavailable. Type the vendor's reply instead — the judge cannot tell the difference.</div>`
+      }
+      <textarea id="typed" rows="3" placeholder="…or type what the vendor says"></textarea>
+      <div class="row-btns">
+        <button id="submitreply">Submit reply</button>
+        <button id="useseed" class="ghost">Use the scripted reply</button>
+      </div>
+    </div>`;
+
+  const rec = $("#rec");
+  if (rec) rec.addEventListener("click", () => toggleRecord(id));
+  $("#submitreply").addEventListener("click", () => sendReply(id));
+  $("#useseed").addEventListener("click", () => sendReply(id, { seeded: true }));
+}
+
+async function toggleRecord(id) {
+  const btn = $("#rec");
+  const state = $("#recstate");
+
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+    btn.textContent = "● Hold the mic — record the reply";
+    btn.classList.remove("recording");
+    state.textContent = "processing…";
+    return;
+  }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    state.textContent = "microphone blocked — type the reply instead";
+    return;
+  }
+
+  chunks = [];
+  recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = (e) => chunks.push(e.data);
+  recorder.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    const blob = new Blob(chunks, { type: "audio/webm" });
+    await sendReply(id, { blob });
+  };
+  recorder.start();
+  btn.textContent = "■ Stop and transcribe";
+  btn.classList.add("recording");
+  state.textContent = "listening…";
+}
+
+async function sendReply(id, { blob, seeded } = {}) {
+  const fd = new FormData();
+  if (blob) fd.append("audio", blob, "reply.webm");
+  else if (!seeded) {
+    const typed = $("#typed").value.trim();
+    if (typed) fd.append("text", typed);
+  }
+
+  const r = await fetch(`/api/holds/${id}/reply`, { method: "POST", body: fd });
+  if (!r.ok) {
+    const state = $("#recstate");
+    if (state) state.textContent = await r.text();
+    return;
+  }
+  await load();
+  await showDetail(id);
 }
 
 function renderVerification(v) {
@@ -110,11 +196,21 @@ function renderVerification(v) {
       <span class="pill ${v.judgment === "denied" ? "blocked" : v.judgment === "confirmed" ? "approved" : "escalated"}">${v.judgment}</span>
       <strong>${label}</strong>
     </div>
-    <div class="dial">Dialled <b>${v.dialed_number}</b> — the number on file, not one from the email.</div>
+    <div class="dial">Dialled <b>${v.dialed_number}</b> — the number on file, not one from the email.
+      ${sourceLabel(v.reply_source)}</div>
     <div class="transcript">${transcript}</div>
     ${v.judge_quote ? `<div class="note">Judged on: “${escapeHtml(v.judge_quote)}”</div>` : ""}
-    ${v.audio_path ? `<audio controls src="/api/recording/${v.audio_path.split("/").pop()}"></audio>` : ""}
+    ${v.audio_path ? `<div class="note" style="margin-top:12px">Agent</div>
+       <audio controls src="/api/recording/${v.audio_path.split("/").pop()}"></audio>` : ""}
+    ${v.reply_audio_path ? `<div class="note">Vendor — what was actually said</div>
+       <audio controls src="/api/recording/${v.reply_audio_path.split("/").pop()}"></audio>` : ""}
   </div>`;
+}
+
+function sourceLabel(src) {
+  if (src === "spoken") return '<span class="src live">transcribed from speech</span>';
+  if (src === "typed") return '<span class="src">typed reply</span>';
+  return '<span class="src">scripted reply</span>';
 }
 
 function escapeHtml(s) {

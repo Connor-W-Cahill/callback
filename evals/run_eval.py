@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src import config, db  # noqa: E402
+from src import config, db, llm  # noqa: E402
 from src.extract import extractor  # noqa: E402
 from src.judge import judge as judging  # noqa: E402
 from src.score import features, resolve, scorer  # noqa: E402
@@ -59,6 +59,7 @@ def score_case(conn, case: dict, *, use_llm: bool) -> dict:
 
 
 def fraud_eval(conn, cases: list[dict], *, use_llm: bool) -> dict:
+    llm.STATS.reset()
     rows = [score_case(conn, c, use_llm=use_llm) for c in cases]
     tp = sum(1 for r in rows if r["truth"] == "fraud" and r["predicted_fraud"])
     fn = sum(1 for r in rows if r["truth"] == "fraud" and not r["predicted_fraud"])
@@ -81,6 +82,18 @@ def fraud_eval(conn, cases: list[dict], *, use_llm: bool) -> dict:
         "change_friction": len(change_friction),
         "routine_friction": routine_friction,
         "by_tag": _tag_recall(rows),
+        "llm": _llm_snapshot(),
+    }
+
+
+def _llm_snapshot() -> dict:
+    st = llm.STATS
+    return {
+        "calls": st.attempts,
+        "succeeded": st.succeeded,
+        "failed": st.failed,
+        "fallback_rate": st.fallback_rate,
+        "reasons": dict(st.reasons),
     }
 
 
@@ -95,6 +108,7 @@ def _tag_recall(rows) -> dict:
 
 
 def judge_eval(cases: list[dict], *, use_llm: bool) -> dict:
+    llm.STATS.reset()
     rows = []
     for c in cases:
         v = judging.judge(c["transcript"]) if use_llm else judging.judge_rules(c["transcript"])
@@ -107,7 +121,26 @@ def judge_eval(cases: list[dict], *, use_llm: bool) -> dict:
         "accuracy": correct / len(rows) if rows else 0.0,
         "catastrophic": catastrophic,
         "confusion": Counter((r["truth"], r["pred"]) for r in rows),
+        "llm": _llm_snapshot(),
     }
+
+
+def _print_llm(snap: dict, use_llm: bool) -> None:
+    """Say plainly how much of this condition was actually the model."""
+    if not use_llm:
+        return
+    if snap["calls"] == 0:
+        print("\n  model calls: none")
+        return
+    rate = snap["fallback_rate"]
+    flag = "" if rate == 0 else ("  <- WARNING" if rate > 0.2 else "  <- some")
+    print(f"\n  model calls: {snap['succeeded']}/{snap['calls']} succeeded, "
+          f"{snap['failed']} fell back to rules ({rate:.0%}){flag}")
+    for why, n in sorted(snap["reasons"].items(), key=lambda kv: -kv[1])[:3]:
+        print(f"    {n}x {why}")
+    if rate > 0.5:
+        print("    NOTE: most of this condition WAS the rules path. Do not")
+        print("          present it as a Nemotron result.")
 
 
 def bar(label, value, width=28):
@@ -162,6 +195,7 @@ def main() -> None:
         print(f"\n  fraud that escaped the hold entirely: {len(r['escaped'])}  <- the number that matters")
         print(f"  legitimate changes held for a call:   {r['change_friction']}  (cost: one phone call each)")
         print(f"  routine invoices wrongly held:        {len(r['routine_friction'])}")
+        _print_llm(r["llm"], use_llm)
 
     print()
     print("=" * 66)
@@ -179,6 +213,7 @@ def main() -> None:
         wrong = [r for r in j["rows"] if r["truth"] != r["pred"]]
         for w in wrong:
             print(f"    {w['id']}: labeled {w['truth']}, judged {w['pred']}")
+        _print_llm(j["llm"], use_llm)
 
     if not live:
         print()

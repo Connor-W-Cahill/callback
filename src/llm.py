@@ -90,8 +90,114 @@ JOB_MODELS = {
 # ceiling was cutting off work that was about to succeed.
 JOB_TIMEOUT = {"score": 40.0, "judge": 40.0, "vendor_match": 30.0}
 
-MAX_INFLIGHT = int(os.getenv("LLM_MAX_INFLIGHT", "3"))
+MAX_INFLIGHT = int(os.getenv("LLM_MAX_INFLIGHT", "4"))
 _SEM = threading.Semaphore(MAX_INFLIGHT)
+
+# --- spreading load so a model is never the thing that is overloaded --------
+#
+# A global cap alone still let every request pile onto ONE model: the chain has
+# a preferred order, so four callers all hit the same worker pool at once and
+# it answers "ResourceExhausted: Worker local total". Three mechanisms here:
+#
+#   a per-model gate    at most N requests against any single model
+#   minimum spacing     consecutive calls to one model are held apart
+#   adaptive cooldown   a model that returns 503 is skipped for a growing
+#                       interval, so load shifts to a healthy one instead of
+#                       retrying into a wall
+#
+# Together these turn a burst into a paced stream across the whole chain.
+PER_MODEL_INFLIGHT = int(os.getenv("LLM_PER_MODEL_INFLIGHT", "2"))
+MIN_SPACING = float(os.getenv("LLM_MIN_SPACING", "0.35"))
+COOLDOWN_BASE = float(os.getenv("LLM_COOLDOWN_BASE", "2.0"))
+COOLDOWN_MAX = float(os.getenv("LLM_COOLDOWN_MAX", "30.0"))
+
+_gate_lock = threading.Lock()
+_gates: dict[str, threading.Semaphore] = {}
+_inflight: dict[str, int] = {}
+_last_call: dict[str, float] = {}
+_cooldown_until: dict[str, float] = {}
+_cooldown_len: dict[str, float] = {}
+
+
+def _gate(model: str) -> threading.Semaphore:
+    with _gate_lock:
+        if model not in _gates:
+            _gates[model] = threading.Semaphore(PER_MODEL_INFLIGHT)
+        return _gates[model]
+
+
+def _cooling(model: str) -> float:
+    """Seconds left before this model should be tried again."""
+    return max(0.0, _cooldown_until.get(model, 0.0) - time.time())
+
+
+def _penalise(model: str) -> None:
+    """A model said it is overloaded. Stand off, doubling each time."""
+    with _gate_lock:
+        nxt = min(COOLDOWN_MAX, max(COOLDOWN_BASE, _cooldown_len.get(model, 0.0) * 2))
+        _cooldown_len[model] = nxt
+        _cooldown_until[model] = time.time() + nxt
+
+
+def _reward(model: str) -> None:
+    """It answered. Clear the penalty so load can return to it."""
+    with _gate_lock:
+        _cooldown_len.pop(model, None)
+        _cooldown_until.pop(model, None)
+
+
+def _pace(model: str) -> None:
+    """Hold consecutive calls to one model apart."""
+    with _gate_lock:
+        last = _last_call.get(model, 0.0)
+        wait = MIN_SPACING - (time.time() - last)
+        _last_call[model] = time.time() + max(0.0, wait)
+    if wait > 0:
+        time.sleep(wait)
+
+
+def _enter(model: str) -> None:
+    with _gate_lock:
+        _inflight[model] = _inflight.get(model, 0) + 1
+
+
+def _leave(model: str) -> None:
+    with _gate_lock:
+        _inflight[model] = max(0, _inflight.get(model, 1) - 1)
+
+
+def order_models(models: list[str]) -> list[str]:
+    """Keep the preferred model until it is saturated, then spill to the next.
+
+    Preference alone concentrated a burst on the head of the chain -- 11 of 12
+    calls hit one model while the other idled, and the busy one returned 503s.
+    But pure least-loaded routing is worse: it sends work to a slower model
+    while the fast one is free, and measured on extraction that cost a failure
+    (super-120b 4.1s median vs omni 10.0s).
+
+    So: order by cooldown, then by whether the model is already at its gate
+    limit, then by the chain's own preference. Load spills only when the
+    preferred model is actually full.
+    """
+    rank = {m: i for i, m in enumerate(models)}
+    return sorted(
+        models,
+        key=lambda m: (
+            _cooling(m),
+            1 if _inflight.get(m, 0) >= PER_MODEL_INFLIGHT else 0,
+            rank[m],
+        ),
+    )
+
+
+def health() -> dict:
+    """What the dispatcher currently believes about each model."""
+    return {
+        m: {"cooling_for": round(_cooling(m), 1),
+            "penalty": round(_cooldown_len.get(m, 0.0), 1),
+            "inflight": _inflight.get(m, 0)}
+        for m in set(list(_cooldown_until) + list(_gates) + list(_inflight))
+    }
 
 # One pooled client: every call was paying for a fresh TLS handshake.
 _CLIENT = httpx.Client(
@@ -140,6 +246,10 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
     else:
         models = [config.NEMOTRON_MODEL]
         models += [m for m in config.NEMOTRON_MODELS if m not in models]
+
+    # Least busy healthy model first. A model in cooldown stays in the list as
+    # a last resort -- a slow answer beats no answer.
+    models = order_models(models)
     for model in models:
         # Rebuild per model. Dropping response_format for one model that
         # rejects it must not silently disarm schema-constrained decoding for
@@ -151,8 +261,10 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
             raw = ""
             t0 = time.time()
             try:
-                with _SEM:
-                    # Start the clock inside the gate: queueing behind other
+                _pace(model)
+                _enter(model)
+                with _SEM, _gate(model):
+                    # Start the clock inside the gates: queueing behind other
                     # requests is our latency, not the model's.
                     t0 = time.time()
                     r = _CLIENT.post(
@@ -161,9 +273,11 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
                         json=payload,
                         timeout=JOB_TIMEOUT.get(job, float(config.LLM_TIMEOUT)),
                     )
+                _leave(model)
                 r.raise_for_status()
                 raw = r.json()["choices"][0]["message"]["content"]
                 out = _parse_json(raw)
+                _reward(model)
                 STATS.succeeded += 1
                 STATS.used[model] = STATS.used.get(model, 0) + 1
                 telemetry.record(
@@ -173,6 +287,7 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
                 )
                 return out
             except Exception as e:  # noqa: BLE001 - classified below
+                _leave(model)
                 last = f"{type(e).__name__} on {model.split('/')[-1]}: {e}"
                 telemetry.record(
                     service="nemotron", job=job, model=model, ok=False,
@@ -189,6 +304,8 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
                 # Overload and rate limiting fail in milliseconds and clear on
                 # their own, so several quick retries cost almost nothing.
                 if status in (429, 500, 502, 503, 504):
+                    # Overloaded: stand off this model and prefer another.
+                    _penalise(model)
                     if attempt < RETRIES:
                         time.sleep(0.35 * (2 ** attempt) + random.uniform(0, 0.25))
                         continue

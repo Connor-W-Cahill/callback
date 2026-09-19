@@ -567,6 +567,12 @@ def activity():
             "timeout_s": config.LLM_TIMEOUT,
         },
         "elevenlabs_chars_used_this_session": tts_chars,
+        "dispatch": {
+            "max_inflight": llm.MAX_INFLIGHT,
+            "per_model_inflight": llm.PER_MODEL_INFLIGHT,
+            "min_spacing_s": llm.MIN_SPACING,
+            "model_health": llm.health(),
+        },
     }
 
 

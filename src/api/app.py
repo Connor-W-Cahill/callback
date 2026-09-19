@@ -29,28 +29,24 @@ def conn(*, ensure_seeded: bool = False):
     c = db.connect()
     db.init(c)
     if ensure_seeded:
-        _ensure_seeded(c)
+        _ensure_vendors(c)
     return c
 
 
-def _ensure_seeded(c) -> None:
-    """Seed and process the demo inbox if this instance has an empty database.
+def _ensure_vendors(c) -> None:
+    """Make sure the vendor master exists. Nothing else.
 
-    Serverless instances each get their own /tmp, so a reset on one container
-    leaves every other one empty. Rather than showing an empty queue, any
-    instance that finds itself bare builds the demo for itself.
+    Vendors are reference data -- inbound mail cannot be resolved without them,
+    and on serverless each instance has its own empty /tmp. The demo *inbox* is
+    deliberately NOT loaded here: a page reload should not conjure payment
+    changes that nobody sent. Those arrive by email, or from the Reset button.
     """
-    if c.execute("SELECT COUNT(*) FROM message").fetchone()[0]:
+    if c.execute("SELECT COUNT(*) FROM vendor").fetchone()[0]:
         return
     with _seed_lock:
-        if c.execute("SELECT COUNT(*) FROM message").fetchone()[0]:
+        if c.execute("SELECT COUNT(*) FROM vendor").fetchone()[0]:
             return
         db.seed(c)
-        for m in inbox.load():
-            try:
-                process(c, m)
-            except Exception:  # noqa: BLE001 - a bad message must not brick the page
-                continue
 
 
 @app.on_event("startup")
@@ -126,13 +122,31 @@ async def twilio_recording(request: Request, hold_id: str = ""):
         raise HTTPException(403, "bad Twilio signature")
 
     rec_url = form.get("RecordingUrl")
+    rec_sid = form.get("RecordingSid", "")
     if not rec_url:
         return Response(content="<Response/>", media_type="application/xml")
 
     c = conn()
+    # Twilio posts the same recording to BOTH the Record action and the
+    # recordingStatusCallback, so without this the clip is transcribed and
+    # judged twice -- double the STT spend for an identical verdict.
+    if rec_sid and c.execute(
+        "SELECT 1 FROM verification WHERE recording_sid=?", (rec_sid,)
+    ).fetchone():
+        return Response(content="<Response/>", media_type="application/xml")
+
     try:
-        audio = telephony.fetch_recording(rec_url)
-        result = verify(c, hold_id, reply_audio=audio, audio_filename="twilio.wav")
+        result = verify(
+            c, hold_id,
+            reply_audio=telephony.fetch_recording(rec_url),
+            audio_filename="twilio.wav",
+        )
+        if rec_sid:
+            c.execute(
+                "UPDATE verification SET recording_sid=? WHERE id=?",
+                (rec_sid, result["verification_id"]),
+            )
+            c.commit()
         db.log(c, "twilio", f"call_{result['judgment']}", hold_id, result["reasoning"])
     except Exception as e:  # noqa: BLE001 - never hand Twilio a 500
         db.log(c, "twilio", "call_failed", hold_id, str(e)[:200])
@@ -151,12 +165,24 @@ async def twilio_status(request: Request, hold_id: str = ""):
     if not telephony.valid_signature(str(request.url), form, request.headers.get("X-Twilio-Signature", "")):
         raise HTTPException(403, "bad Twilio signature")
     status = form.get("CallStatus", "")
-    if status in ("no-answer", "busy", "failed", "canceled"):
+    if status in ("no-answer", "busy", "failed", "canceled", "completed"):
         c = conn()
-        # Nobody confirmed anything, so the payment stays put.
-        c.execute("UPDATE hold SET status='escalated' WHERE id=? AND status='calling'", (hold_id,))
-        c.commit()
-        db.log(c, "twilio", f"call_{status}", hold_id, "no verification obtained; payment stays held")
+        # A call that ended without a recording -- hung up early, voicemail, or
+        # silence past the record timeout -- still has to resolve, or the hold
+        # sits on 'calling' forever and the clerk never learns anything.
+        done = c.execute(
+            "SELECT 1 FROM verification WHERE hold_id=?", (hold_id,)
+        ).fetchone()
+        if not done:
+            c.execute(
+                "UPDATE hold SET status='escalated' WHERE id=? AND status='calling'",
+                (hold_id,),
+            )
+            c.commit()
+            db.log(
+                c, "twilio", f"call_{status}", hold_id,
+                f"call ended ({status}) with no answer recorded; payment stays held",
+            )
     return Response(content="<Response/>", media_type="application/xml")
 
 

@@ -47,6 +47,7 @@ LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "12"))
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "eng")
 
 # Any request touching payment details is verified regardless of score.
 # This is policy, not a threshold -- see docs. HOLD_THRESHOLD only governs

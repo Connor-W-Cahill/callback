@@ -2,89 +2,191 @@
   {
     "id": "v-allegheny",
     "name": "Allegheny Sheet Metal",
-    "domains": ["alleghenysheetmetal.com"],
-    "known_senders": ["billing@alleghenysheetmetal.com", "ap@alleghenysheetmetal.com", "dperkins@alleghenysheetmetal.com"],
-    "phone_on_file": "+1-412-555-0142",
+    "domains": [
+      "alleghenysheetmetal.com"
+    ],
+    "known_senders": [
+      "billing@alleghenysheetmetal.com",
+      "ap@alleghenysheetmetal.com",
+      "dperkins@alleghenysheetmetal.com"
+    ],
+    "phone_on_file": "+15135254447",
     "contact_name": "Denise Perkins",
-    "bank": {"account": "8841003392", "routing": "043000096", "country": "US", "bank_name": "Dollar Bank"},
-    "typical_amount": [1800.0, 9400.0],
+    "bank": {
+      "account": "8841003392",
+      "routing": "043000096",
+      "country": "US",
+      "bank_name": "Dollar Bank"
+    },
+    "typical_amount": [
+      1800.0,
+      9400.0
+    ],
     "category": "materials"
   },
   {
     "id": "v-monongahela",
     "name": "Monongahela Supply Co",
-    "domains": ["mon-supply.com"],
-    "known_senders": ["invoices@mon-supply.com", "rortiz@mon-supply.com"],
-    "phone_on_file": "+1-412-555-0187",
+    "domains": [
+      "mon-supply.com"
+    ],
+    "known_senders": [
+      "invoices@mon-supply.com",
+      "rortiz@mon-supply.com"
+    ],
+    "phone_on_file": "+15135254447",
     "contact_name": "Raul Ortiz",
-    "bank": {"account": "2290117845", "routing": "043318092", "country": "US", "bank_name": "PNC Bank"},
-    "typical_amount": [400.0, 3200.0],
+    "bank": {
+      "account": "2290117845",
+      "routing": "043318092",
+      "country": "US",
+      "bank_name": "PNC Bank"
+    },
+    "typical_amount": [
+      400.0,
+      3200.0
+    ],
     "category": "materials"
   },
   {
     "id": "v-keystone",
     "name": "Keystone Refrigerant Partners",
-    "domains": ["keystonerefrigerant.com"],
-    "known_senders": ["ar@keystonerefrigerant.com"],
-    "phone_on_file": "+1-724-555-0119",
+    "domains": [
+      "keystonerefrigerant.com"
+    ],
+    "known_senders": [
+      "ar@keystonerefrigerant.com"
+    ],
+    "phone_on_file": "+15135254447",
     "contact_name": "Marty Vance",
-    "bank": {"account": "6620884417", "routing": "031201360", "country": "US", "bank_name": "First National"},
-    "typical_amount": [2200.0, 14500.0],
+    "bank": {
+      "account": "6620884417",
+      "routing": "031201360",
+      "country": "US",
+      "bank_name": "First National"
+    },
+    "typical_amount": [
+      2200.0,
+      14500.0
+    ],
     "category": "materials"
   },
   {
     "id": "v-threerivers",
     "name": "Three Rivers Fleet Services",
-    "domains": ["3riversfleet.com"],
-    "known_senders": ["billing@3riversfleet.com", "kdowd@3riversfleet.com"],
-    "phone_on_file": "+1-412-555-0163",
+    "domains": [
+      "3riversfleet.com"
+    ],
+    "known_senders": [
+      "billing@3riversfleet.com",
+      "kdowd@3riversfleet.com"
+    ],
+    "phone_on_file": "+15135254447",
     "contact_name": "Kelly Dowd",
-    "bank": {"account": "5513092284", "routing": "043000096", "country": "US", "bank_name": "Dollar Bank"},
-    "typical_amount": [600.0, 4100.0],
+    "bank": {
+      "account": "5513092284",
+      "routing": "043000096",
+      "country": "US",
+      "bank_name": "Dollar Bank"
+    },
+    "typical_amount": [
+      600.0,
+      4100.0
+    ],
     "category": "fleet"
   },
   {
     "id": "v-lawrenceville",
     "name": "Lawrenceville Electrical Wholesale",
-    "domains": ["lvillewholesale.com"],
-    "known_senders": ["accounts@lvillewholesale.com"],
-    "phone_on_file": "+1-412-555-0198",
+    "domains": [
+      "lvillewholesale.com"
+    ],
+    "known_senders": [
+      "accounts@lvillewholesale.com"
+    ],
+    "phone_on_file": "+15135254447",
     "contact_name": "Sam Bretz",
-    "bank": {"account": "7734112209", "routing": "042000314", "country": "US", "bank_name": "Huntington"},
-    "typical_amount": [900.0, 6800.0],
+    "bank": {
+      "account": "7734112209",
+      "routing": "042000314",
+      "country": "US",
+      "bank_name": "Huntington"
+    },
+    "typical_amount": [
+      900.0,
+      6800.0
+    ],
     "category": "materials"
   },
   {
     "id": "v-steelcity",
     "name": "Steel City Uniform & Linen",
-    "domains": ["steelcityuniform.com"],
-    "known_senders": ["ar@steelcityuniform.com"],
-    "phone_on_file": "+1-412-555-0124",
+    "domains": [
+      "steelcityuniform.com"
+    ],
+    "known_senders": [
+      "ar@steelcityuniform.com"
+    ],
+    "phone_on_file": "+15135254447",
     "contact_name": "Yvonne Cho",
-    "bank": {"account": "3318820046", "routing": "043318092", "country": "US", "bank_name": "PNC Bank"},
-    "typical_amount": [280.0, 720.0],
+    "bank": {
+      "account": "3318820046",
+      "routing": "043318092",
+      "country": "US",
+      "bank_name": "PNC Bank"
+    },
+    "typical_amount": [
+      280.0,
+      720.0
+    ],
     "category": "services"
   },
   {
     "id": "v-ohiovalley",
     "name": "Ohio Valley Insurance Group",
-    "domains": ["ohiovalleyins.com"],
-    "known_senders": ["premiums@ohiovalleyins.com", "tgarrity@ohiovalleyins.com"],
-    "phone_on_file": "+1-330-555-0176",
+    "domains": [
+      "ohiovalleyins.com"
+    ],
+    "known_senders": [
+      "premiums@ohiovalleyins.com",
+      "tgarrity@ohiovalleyins.com"
+    ],
+    "phone_on_file": "+15135254447",
     "contact_name": "Tom Garrity",
-    "bank": {"account": "9041558832", "routing": "041000124", "country": "US", "bank_name": "Fifth Third"},
-    "typical_amount": [3100.0, 3100.0],
+    "bank": {
+      "account": "9041558832",
+      "routing": "041000124",
+      "country": "US",
+      "bank_name": "Fifth Third"
+    },
+    "typical_amount": [
+      3100.0,
+      3100.0
+    ],
     "category": "insurance"
   },
   {
     "id": "v-bridgeworks",
     "name": "Bridgeworks Controls LLC",
-    "domains": ["bridgeworkscontrols.com"],
-    "known_senders": ["ap@bridgeworkscontrols.com", "jnadeau@bridgeworkscontrols.com"],
-    "phone_on_file": "+1-412-555-0155",
+    "domains": [
+      "bridgeworkscontrols.com"
+    ],
+    "known_senders": [
+      "ap@bridgeworkscontrols.com",
+      "jnadeau@bridgeworkscontrols.com"
+    ],
+    "phone_on_file": "+15135254447",
     "contact_name": "Jeanne Nadeau",
-    "bank": {"account": "1182774403", "routing": "031201360", "country": "US", "bank_name": "First National"},
-    "typical_amount": [5000.0, 22000.0],
+    "bank": {
+      "account": "1182774403",
+      "routing": "031201360",
+      "country": "US",
+      "bank_name": "First National"
+    },
+    "typical_amount": [
+      5000.0,
+      22000.0
+    ],
     "category": "equipment"
   }
 ]

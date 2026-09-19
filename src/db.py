@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS verification (
     judge_reasoning TEXT,
     reply_audio_path TEXT,
     reply_source TEXT,
+    recording_sid TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -98,7 +99,7 @@ def init(conn: sqlite3.Connection) -> None:
 def _migrate(conn: sqlite3.Connection) -> None:
     """Add columns to databases created by an earlier version."""
     have = {r["name"] for r in conn.execute("PRAGMA table_info(verification)")}
-    for col in ("reply_audio_path", "reply_source"):
+    for col in ("reply_audio_path", "reply_source", "recording_sid"):
         if col not in have:
             conn.execute(f"ALTER TABLE verification ADD COLUMN {col} TEXT")
     vhave = {r["name"] for r in conn.execute("PRAGMA table_info(vendor)")}

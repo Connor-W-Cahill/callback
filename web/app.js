@@ -75,6 +75,12 @@ function renderQueue(msgs) {
     })
     .join("");
 
+  if (!holds.length) {
+    $("#holds").innerHTML =
+      `<div class="empty">Nothing held. Email the address above and anything that
+       asks to move money shows up here.</div>`;
+  }
+
   const cleared = msgs.filter((m) => m.status === "cleared");
   $("#cleared").innerHTML = cleared.length
     ? `<h2>Cleared — paid without friction</h2>` +
@@ -313,19 +319,12 @@ $("#reset").addEventListener("click", async () => {
   await load();
 });
 
-// Seed on first load only. A reset costs ~8 Nemotron calls and a page load is
-// free to anyone with the URL, so resetting unconditionally lets a crawler or a
-// link-preview bot drain the credits this demo runs on. The Reset button is
-// still there for a deliberate re-run.
+// A reload shows what actually happened -- nothing more. The queue fills from
+// real email arriving in the inbox; the Reset button loads the canned demo when
+// you deliberately want it.
 async function boot() {
   await loadStatus();
   await loadMailbox();
-  try {
-    const holds = await api("/api/holds");
-    if (!holds.length) await api("/api/reset", { method: "POST" });
-  } catch (e) {
-    /* fall through to load() and show whatever state exists */
-  }
   await load();
 }
 

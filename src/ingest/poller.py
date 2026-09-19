@@ -92,6 +92,8 @@ def _maybe_auto_call(conn, decision) -> None:
 def _poll_once(acct: mailbox.Account) -> None:
     conn = db.connect()
     db.init(conn)
+    if not conn.execute("SELECT COUNT(*) FROM vendor").fetchone()[0]:
+        db.seed(conn)  # reference data only; no demo inbox
     try:
         for summary in mailbox.list_messages(acct):
             msg_id = f"mail-{summary['id']}"

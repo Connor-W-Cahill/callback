@@ -130,11 +130,16 @@ def transcribe(data: bytes, filename: str = "reply.webm", *, keep_as: str | None
 
     t0 = _t.time()
     try:
+        # Telephony audio is 8kHz mu-law -- far worse than a browser mic. Left to
+        # auto-detect, the model drifts to another language on short noisy clips
+        # ("No, we never sent that" came back as "No, itu na"). Pinning the
+        # language removes that whole failure mode.
+        form = {"model_id": "scribe_v1", "language_code": config.STT_LANGUAGE}
         r = httpx.post(
             STT_URL,
             headers={"xi-api-key": config.ELEVENLABS_API_KEY},
             files={"file": (filename, data)},
-            data={"model_id": "scribe_v1"},
+            data=form,
             timeout=120.0,
         )
         r.raise_for_status()

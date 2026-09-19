@@ -8,8 +8,5 @@
       "memory": 2048,
       "includeFiles": "data/seed/**"
     }
-  },
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" }
-  ]
+  }
 }

@@ -204,7 +204,9 @@ def _save_message(conn: sqlite3.Connection, message: dict, ex: extractor.Extract
 
 
 def _save_hold(conn, message, vendor, assessment, signals) -> str:
-    hold_id = f"hold-{uuid.uuid4().hex[:8]}"
+    # Derived from the message, not random. On serverless each instance seeds
+    # its own /tmp, and a random id minted on one container 404s on the next.
+    hold_id = f"hold-{message['id']}"
     conn.execute(
         """INSERT INTO hold (id, message_id, vendor_id, score, rationale, signals, status, created_at)
            VALUES (?,?,?,?,?,?,?,?)""",

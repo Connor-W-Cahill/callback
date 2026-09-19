@@ -1,6 +1,7 @@
 """Backend for the AP clerk's hold queue."""
 import base64
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -18,10 +19,35 @@ app = FastAPI(title="Callback", description="Vendor payment-change fraud interce
 WEB = config.ROOT / "web"
 
 
-def conn():
+_seed_lock = threading.Lock()
+
+
+def conn(*, ensure_seeded: bool = False):
     c = db.connect()
     db.init(c)
+    if ensure_seeded:
+        _ensure_seeded(c)
     return c
+
+
+def _ensure_seeded(c) -> None:
+    """Seed and process the demo inbox if this instance has an empty database.
+
+    Serverless instances each get their own /tmp, so a reset on one container
+    leaves every other one empty. Rather than showing an empty queue, any
+    instance that finds itself bare builds the demo for itself.
+    """
+    if c.execute("SELECT COUNT(*) FROM message").fetchone()[0]:
+        return
+    with _seed_lock:
+        if c.execute("SELECT COUNT(*) FROM message").fetchone()[0]:
+            return
+        db.seed(c)
+        for m in inbox.load():
+            try:
+                process(c, m)
+            except Exception:  # noqa: BLE001 - a bad message must not brick the page
+                continue
 
 
 @app.get("/api/status")
@@ -70,14 +96,14 @@ def reset():
 
 @app.get("/api/messages")
 def messages():
-    c = conn()
+    c = conn(ensure_seeded=True)
     rows = c.execute("SELECT id, received_at, sender, subject, status FROM message ORDER BY received_at").fetchall()
     return [dict(r) for r in rows]
 
 
 @app.get("/api/holds")
 def holds():
-    c = conn()
+    c = conn(ensure_seeded=True)
     rows = c.execute(
         """SELECT h.*, m.sender, m.subject, m.received_at, v.name AS vendor_name,
                   v.phone_on_file, v.account AS vendor_account
@@ -100,7 +126,7 @@ def holds():
 
 @app.get("/api/holds/{hold_id}")
 def hold_detail(hold_id: str):
-    c = conn()
+    c = conn(ensure_seeded=True)
     r = c.execute(
         """SELECT h.*, m.sender, m.reply_to, m.subject, m.body, m.extracted,
                   v.name AS vendor_name, v.phone_on_file, v.account AS vendor_account
@@ -125,7 +151,7 @@ def open_call(hold_id: str):
     Returns the number we will dial and, with a key set, audio of the agent
     speaking. The vendor's reply is submitted separately to /reply.
     """
-    c = conn()
+    c = conn(ensure_seeded=True)
     hold = c.execute("SELECT * FROM hold WHERE id=?", (hold_id,)).fetchone()
     if hold is None:
         raise HTTPException(404, "no such hold")
@@ -169,7 +195,7 @@ async def submit_reply(
     text: str | None = Form(default=None),
 ):
     """Submit the vendor's side of the call, spoken or typed, and judge it."""
-    c = conn()
+    c = conn(ensure_seeded=True)
     data = await audio.read() if audio is not None else None
     try:
         if data:

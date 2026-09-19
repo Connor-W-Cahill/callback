@@ -589,6 +589,7 @@ async function renderEngine() {
       <h2>What the models are actually doing</h2>
       <p class="lede">Every call to Nemotron and ElevenLabs, as it happened. Nothing here is
         a mock — if a row says it succeeded, that request went out and came back.</p>
+      ${outcomeBar(d.outcome)}
 
       <div class="svc">
         <h3>Nemotron <span class="${c.nemotron_live ? "ok" : "off"}">${c.nemotron_live ? "live" : "offline — using deterministic fallback"}</span></h3>
@@ -612,6 +613,27 @@ async function renderEngine() {
   el.querySelectorAll(".logrow").forEach((r) =>
     r.addEventListener("click", () => r.classList.toggle("open"))
   );
+}
+
+function outcomeBar(o) {
+  if (!o || !o.requests) return "";
+  const pct = (n) => Math.round((n / o.requests) * 100);
+  return `<div class="outcome">
+    <div><b>${o.requests}</b> requests <span class="dim">from ${o.attempts} attempts</span></div>
+    <div class="obar">
+      <span class="ok" style="width:${pct(o.first_try)}%"></span>
+      <span class="rec" style="width:${pct(o.recovered)}%"></span>
+      <span class="bad" style="width:${pct(o.failed)}%"></span>
+    </div>
+    <div class="okey">
+      <span><i class="sw ok"></i>${o.first_try} first try</span>
+      <span><i class="sw rec"></i>${o.recovered} recovered after retry</span>
+      <span><i class="sw bad"></i>${o.failed} fell back to rules</span>
+    </div>
+    <p class="note">Retries are deliberate. NVIDIA's free tier returns 503s and 429s in
+      well under a second, so a retried call costs little — what matters is the
+      right-hand number.</p>
+  </div>`;
 }
 
 function summaryTable(rows) {

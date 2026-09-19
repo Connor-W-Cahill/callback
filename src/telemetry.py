@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS service_call (
     units INTEGER,              -- characters for elevenlabs, tokens-ish for nemotron
     detail TEXT,                -- error text, or a note
     prompt_excerpt TEXT,
-    response_excerpt TEXT
+    response_excerpt TEXT,
+    req_id TEXT          -- attempts of ONE logical call share this
 );
 """
 
@@ -34,6 +35,9 @@ def _conn() -> sqlite3.Connection:
     c = sqlite3.connect(config.DB_PATH, timeout=10)
     c.row_factory = sqlite3.Row
     c.executescript(SCHEMA)
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(service_call)")}
+    if "req_id" not in cols:
+        c.execute("ALTER TABLE service_call ADD COLUMN req_id TEXT")
     return c
 
 
@@ -48,6 +52,7 @@ def record(
     detail: str = "",
     prompt_excerpt: str = "",
     response_excerpt: str = "",
+    req_id: str = "",
 ) -> None:
     """Best effort: telemetry must never break the pipeline it is watching."""
     try:
@@ -55,8 +60,9 @@ def record(
             c = _conn()
             c.execute(
                 """INSERT INTO service_call
-                   (at, service, job, model, ok, ms, units, detail, prompt_excerpt, response_excerpt)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                   (at, service, job, model, ok, ms, units, detail, prompt_excerpt,
+                    response_excerpt, req_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                     service,
@@ -68,6 +74,7 @@ def record(
                     detail[:400],
                     prompt_excerpt[:1200],
                     response_excerpt[:1200],
+                    req_id,
                 ),
             )
             c.commit()

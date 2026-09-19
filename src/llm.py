@@ -14,6 +14,7 @@ import random
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -131,10 +132,15 @@ def _cooling(model: str) -> float:
     return max(0.0, _cooldown_until.get(model, 0.0) - time.time())
 
 
-def _penalise(model: str) -> None:
-    """A model said it is overloaded. Stand off, doubling each time."""
+def _penalise(model: str, *, hard: bool = False) -> None:
+    """A model said it is overloaded. Stand off, doubling each time.
+
+    `hard` is for 429: being rate limited means we are sending too fast, so the
+    stand-off starts higher than for a capacity 503 we merely collided with.
+    """
+    base = COOLDOWN_BASE * (3 if hard else 1)
     with _gate_lock:
-        nxt = min(COOLDOWN_MAX, max(COOLDOWN_BASE, _cooldown_len.get(model, 0.0) * 2))
+        nxt = min(COOLDOWN_MAX, max(base, _cooldown_len.get(model, 0.0) * 2))
         _cooldown_len[model] = nxt
         _cooldown_until[model] = time.time() + nxt
 
@@ -235,6 +241,7 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
         }
 
     STATS.attempts += 1
+    req_id = uuid.uuid4().hex[:12]
     last = "unknown"
 
     # Walk the model chain. A model that 404s for this account, 503s, or hangs
@@ -283,7 +290,7 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
                 telemetry.record(
                     service="nemotron", job=job, model=model, ok=True,
                     ms=int((time.time() - t0) * 1000), units=len(raw),
-                    prompt_excerpt=user, response_excerpt=raw,
+                    prompt_excerpt=user, response_excerpt=raw, req_id=req_id,
                 )
                 return out
             except Exception as e:  # noqa: BLE001 - classified below
@@ -292,7 +299,7 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
                 telemetry.record(
                     service="nemotron", job=job, model=model, ok=False,
                     ms=int((time.time() - t0) * 1000), detail=last,
-                    prompt_excerpt=user, response_excerpt=raw,
+                    prompt_excerpt=user, response_excerpt=raw, req_id=req_id,
                 )
                 status = getattr(getattr(e, "response", None), "status_code", None)
 
@@ -304,8 +311,9 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
                 # Overload and rate limiting fail in milliseconds and clear on
                 # their own, so several quick retries cost almost nothing.
                 if status in (429, 500, 502, 503, 504):
-                    # Overloaded: stand off this model and prefer another.
-                    _penalise(model)
+                    # 429 is a rate limit we caused; 503 is their capacity.
+                    # Back off harder on the one that is our own fault.
+                    _penalise(model, hard=(status == 429))
                     if attempt < RETRIES:
                         time.sleep(0.35 * (2 ** attempt) + random.uniform(0, 0.25))
                         continue

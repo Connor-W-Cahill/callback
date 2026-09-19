@@ -555,10 +555,33 @@ def activity():
     for a in agg.values():
         a["avg_ms"] = round(a["total_ms"] / a["calls"]) if a["calls"] else 0
 
+    # An attempt is not a request. Retries are deliberate, and counting each one
+    # as a failure made a working pipeline look like it was collapsing. Group by
+    # req_id and report what the caller actually experienced.
+    by_req: dict = {}
+    for r in rows:
+        rid = r.get("req_id") or f"solo-{r['id']}"
+        g = by_req.setdefault(rid, {"job": r["job"], "service": r["service"],
+                                    "attempts": 0, "ok": False, "ms": 0})
+        g["attempts"] += 1
+        g["ms"] += r["ms"] or 0
+        g["ok"] = g["ok"] or bool(r["ok"])
+
+    reqs = list(by_req.values())
+    nem = [g for g in reqs if g["service"] == "nemotron"]
+    outcome = {
+        "requests": len(nem),
+        "first_try": sum(1 for g in nem if g["ok"] and g["attempts"] == 1),
+        "recovered": sum(1 for g in nem if g["ok"] and g["attempts"] > 1),
+        "failed": sum(1 for g in nem if not g["ok"]),
+        "attempts": sum(g["attempts"] for g in nem),
+    }
+
     tts_chars = sum(r["units"] or 0 for r in rows if r["job"] == "tts" and r["ok"])
     return {
         "calls": rows,
         "summary": sorted(agg.values(), key=lambda a: PIPELINE_ORDER.get(a["job"], 99)),
+        "outcome": outcome,
         "config": {
             "nemotron_chain": config.NEMOTRON_MODELS,
             "nemotron_live": config.have_nemotron(),

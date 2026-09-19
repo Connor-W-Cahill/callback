@@ -206,3 +206,19 @@ main, .engine { height: calc(100vh - 61px - 41px); }
 .stab.active .n { color: var(--accent); }
 .blurb { color: var(--dim); font-size: 12.5px; margin: 6px 0 14px; line-height: 1.5; }
 .card.unknown { border-left-color: var(--warn); }
+
+/* --- request outcome bar --- */
+.outcome { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px 16px; margin-bottom: 18px; }
+.obar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 10px 0 9px;
+  background: #12141a; }
+.obar span { display: block; height: 100%; }
+.obar .ok { background: var(--ok); }
+.obar .rec { background: var(--warn); }
+.obar .bad { background: var(--danger); }
+.okey { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--dim); }
+.okey i.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+.okey .sw.ok { background: var(--ok); }
+.okey .sw.rec { background: var(--warn); }
+.okey .sw.bad { background: var(--danger); }
+.outcome .note { margin: 10px 0 0; }

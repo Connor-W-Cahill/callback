@@ -1,0 +1,20 @@
+name: Checks
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      NVIDIA_API_KEY: ''
+      ELEVENLABS_API_KEY: ''
+      CALLBACK_EMAIL: '0'
+      CALLBACK_DEMO: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python evals/run_eval.py --check
+      - run: node --check web/app.js
+      - run: node --test tests/test_web.cjs

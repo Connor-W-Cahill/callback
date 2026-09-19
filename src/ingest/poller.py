@@ -53,7 +53,7 @@ def _loop() -> None:
         running=True,
         address=acct.address,
         error=None,
-        auto_call=bool(config.AUTO_CALL and telephony.configured()),
+        auto_call=bool(not config.DEMO_MODE and config.API_PASSWORD and config.AUTO_CALL and telephony.configured()),
     )
 
     while True:
@@ -75,7 +75,7 @@ def _maybe_auto_call(conn, decision) -> None:
     inbound email is an untrusted trigger. The number still comes from the
     vendor master; nothing in the email chooses who we dial.
     """
-    if not (config.AUTO_CALL and telephony.configured()):
+    if config.DEMO_MODE or not config.API_PASSWORD or not (config.AUTO_CALL and telephony.configured()):
         return
     if not decision.vendor:
         print("[mail] held, but no vendor on file to call")

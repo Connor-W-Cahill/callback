@@ -15,6 +15,7 @@ import re
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -118,6 +119,18 @@ _inflight: dict[str, int] = {}
 _last_call: dict[str, float] = {}
 _cooldown_until: dict[str, float] = {}
 _cooldown_len: dict[str, float] = {}
+_override = threading.local()
+
+
+@contextmanager
+def model_override(model: str | None):
+    """Use one model for a scoped comparison without changing app routing."""
+    previous = getattr(_override, "model", None)
+    _override.model = model
+    try:
+        yield
+    finally:
+        _override.model = previous
 
 
 def _gate(model: str) -> threading.Semaphore:
@@ -214,7 +227,8 @@ _CLIENT = httpx.Client(
 
 def complete_json(system: str, user: str, *, temperature: float = 0.0,
                   max_tokens: int = 900, job: str = "call",
-                  schema: dict | None = None) -> dict[str, Any]:
+                  schema: dict | None = None,
+                  model: str | None = None) -> dict[str, Any]:
     """Call Nemotron and parse a JSON object out of the reply.
 
     With a schema, the server constrains decoding to valid JSON. Without one,
@@ -225,8 +239,9 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
     if not config.have_nemotron():
         raise LLMUnavailable("NVIDIA_API_KEY not set")
 
+    forced_model = model or getattr(_override, "model", None)
     base_payload: dict[str, Any] = {
-        "model": config.NEMOTRON_MODEL,
+        "model": forced_model or config.NEMOTRON_MODEL,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -248,7 +263,9 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0,
     # should cost us one timeout, not the whole request.
     # A job with an explicit route uses only that route: falling through to a
     # model measured to fail this prompt costs latency and buys nothing.
-    if job in JOB_MODELS:
+    if forced_model:
+        models = [forced_model]
+    elif job in JOB_MODELS:
         models = list(JOB_MODELS[job])
     else:
         models = [config.NEMOTRON_MODEL]

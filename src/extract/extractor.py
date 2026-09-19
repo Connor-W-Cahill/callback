@@ -97,6 +97,7 @@ class Extraction:
     requests_payment_change: bool = False
     discourages_verification: bool = False
     urgency: str = "none"
+    payment_details_unclear: bool = False
     source: str = "rules"
 
     def to_dict(self) -> dict[str, Any]:

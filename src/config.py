@@ -73,3 +73,9 @@ def have_nemotron() -> bool:
 
 def have_elevenlabs() -> bool:
     return bool(ELEVENLABS_API_KEY)
+
+# Demo endpoints may simulate approval. Live mode requires authenticated access
+# and a signed recording from the outbound call before verification can settle.
+DEMO_MODE = os.getenv("CALLBACK_DEMO", "1") == "1"
+API_PASSWORD = os.getenv("CALLBACK_API_PASSWORD", "")
+MAX_AUDIO_BYTES = 10 * 1024 * 1024

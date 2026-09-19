@@ -57,6 +57,12 @@ def compute(
         )
     )
 
+    routing_change = bool(extraction.bank_routing and vendor
+                          and extraction.bank_routing != vendor["routing"])
+    sig.append(Signal("routing_change", routing_change, 0.40,
+                      "routing number differs from the vendor master" if routing_change
+                      else "no routing change detected"))
+
     # --- lookalike domain ---
     lookalike = match_evidence.get("matched_on") == "lookalike_domain"
     detail = "sender domain matches the vendor master"

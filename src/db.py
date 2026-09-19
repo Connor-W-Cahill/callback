@@ -68,6 +68,11 @@ CREATE TABLE IF NOT EXISTS verification (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS recording_receipt (
+    recording_sid TEXT PRIMARY KEY,
+    hold_id TEXT NOT NULL REFERENCES hold(id)
+);
+
 CREATE TABLE IF NOT EXISTS audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     at TEXT NOT NULL,
@@ -102,6 +107,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for col in ("reply_audio_path", "reply_source", "recording_sid"):
         if col not in have:
             conn.execute(f"ALTER TABLE verification ADD COLUMN {col} TEXT")
+    hhave = {r["name"] for r in conn.execute("PRAGMA table_info(hold)")}
+    for col in ("call_sid", "call_token"):
+        if col not in hhave:
+            conn.execute(f"ALTER TABLE hold ADD COLUMN {col} TEXT")
     vhave = {r["name"] for r in conn.execute("PRAGMA table_info(vendor)")}
     if "custom" not in vhave:
         conn.execute("ALTER TABLE vendor ADD COLUMN custom INTEGER NOT NULL DEFAULT 0")
@@ -162,7 +171,7 @@ def clear(conn: sqlite3.Connection) -> None:
     Vendors the user added or edited (custom=1) survive: resetting the demo
     should not throw away a vendor somebody just typed in.
     """
-    for table in ("verification", "hold", "message", "audit", "payment"):
+    for table in ("recording_receipt", "verification", "hold", "message", "audit", "payment"):
         conn.execute(f"DELETE FROM {table}")
     conn.execute("DELETE FROM vendor WHERE custom = 0")
     conn.commit()
@@ -187,11 +196,12 @@ def payments_for(conn: sqlite3.Connection, vendor_id: str, limit: int = 20) -> l
     return [dict(r) for r in rows]
 
 
-def log(conn: sqlite3.Connection, actor: str, action: str, subject: str = "", detail: str = "") -> None:
+def log(conn: sqlite3.Connection, actor: str, action: str, subject: str = "", detail: str = "", *, commit: bool = True) -> None:
     from datetime import datetime, timezone
 
     conn.execute(
         "INSERT INTO audit (at, actor, action, subject, detail) VALUES (?,?,?,?,?)",
         (datetime.now(timezone.utc).isoformat(timespec="seconds"), actor, action, subject, detail),
     )
-    conn.commit()
+    if commit:
+        conn.commit()

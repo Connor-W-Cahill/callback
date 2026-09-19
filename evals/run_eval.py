@@ -11,17 +11,18 @@ import argparse
 import json
 import sys
 from collections import Counter
+from contextlib import closing
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src import config, db, llm  # noqa: E402
-from src.extract import extractor  # noqa: E402
+from src import config, db, llm, pipeline  # noqa: E402
 from src.judge import judge as judging  # noqa: E402
-from src.score import features, resolve, scorer  # noqa: E402
 
 FRAUD_THRESHOLD = 0.60
+EVAL_DATE = date(2026, 9, 19)
 
 
 def score_case(conn, case: dict, *, use_llm: bool) -> dict:
@@ -33,28 +34,15 @@ def score_case(conn, case: dict, *, use_llm: bool) -> dict:
         "body": case["body"],
         "claimed_vendor": case["claimed_vendor"],
     }
-    ex = extractor.extract(msg) if use_llm else extractor.extract_rules(msg)
-    vendors = db.vendors(conn)
-    vendor, evidence = resolve.resolve(vendors, sender=msg["sender"], claimed_name=case["claimed_vendor"])
-    history = db.payments_for(conn, vendor["id"]) if vendor else []
-    sig = features.compute(
-        extraction=ex, vendor=vendor, history=history, message=msg, match_evidence=evidence
-    )
-    if use_llm:
-        a = scorer.assess(sig, vendor=vendor, extraction=ex)
-        score, source = a.score, a.source
-    else:
-        score, source = features.base_score(sig), "rules"
-
-    held = ex.requests_payment_change or any(s.key == "account_change" and s.fired for s in sig)
+    decision = pipeline.process(conn, msg, use_llm=use_llm, today=EVAL_DATE)
     return {
         "id": case["id"],
         "tag": case["tag"],
         "truth": case["label"],
-        "score": score,
-        "held": held or score >= config.HOLD_THRESHOLD,
-        "predicted_fraud": score >= FRAUD_THRESHOLD,
-        "source": source,
+        "score": decision.assessment.score,
+        "held": decision.held,
+        "predicted_fraud": decision.assessment.score >= FRAUD_THRESHOLD,
+        "source": decision.assessment.source,
     }
 
 
@@ -148,9 +136,30 @@ def bar(label, value, width=28):
     return f"  {label:24s} {'█' * filled}{'░' * (width - filled)} {value:.0%}"
 
 
+def _evaluation_connection():
+    """Conditions must not share persisted messages or holds."""
+    conn = db.connect(":memory:")
+    db.init(conn)
+    db.seed(conn)
+    return conn
+
+
+def _json_results(results: dict) -> dict:
+    """JSON object keys cannot be the tuple keys used by Counter."""
+    out = {}
+    for name, result in results.items():
+        out[name] = {
+            key: ({f"{truth}->{pred}": count for (truth, pred), count in value.items()}
+                  if key == "confusion" else value)
+            for key, value in result.items() if key != "rows"
+        }
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true", help="emit machine-readable results")
+    ap.add_argument("--check", action="store_true", help="fail if fraud escapes a hold or the judge is wrong")
     ap.add_argument(
         "--model",
         action="append",
@@ -163,15 +172,11 @@ def main() -> None:
     emails = json.loads((Path(__file__).parent / "cases" / "emails.json").read_text())
     transcripts = json.loads((Path(__file__).parent / "transcripts" / "cases.json").read_text())
 
-    conn = db.connect(":memory:")
-    db.init(conn)
-    db.seed(conn)
-
     live = config.have_nemotron()
-    conditions: list[tuple[str, bool]] = [("rules only", False)]
+    conditions: list[tuple[str, bool, str | None]] = [("rules only", False, None)]
     if live:
         models = args.model or [config.NEMOTRON_MODEL]
-        conditions += [(f"rules + {m.split('/')[-1]}", True) for m in models]
+        conditions += [(f"rules + {m.split('/')[-1]}", True, m) for m in models]
     elif args.model:
         print("NVIDIA_API_KEY is not set, so --model has nothing to run against.\n")
 
@@ -179,11 +184,9 @@ def main() -> None:
     print("=" * 66)
     print(f"EVAL 1 — fraud detection   ({len(emails)} labeled synthetic emails)")
     print("=" * 66)
-    models_iter = iter(args.model or ([config.NEMOTRON_MODEL] if live else []))
-    for name, use_llm in conditions:
-        if use_llm:
-            config.NEMOTRON_MODEL = next(models_iter, config.NEMOTRON_MODEL)
-        r = fraud_eval(conn, emails, use_llm=use_llm)
+    for name, use_llm, model in conditions:
+        with llm.model_override(model), closing(_evaluation_connection()) as conn:
+            r = fraud_eval(conn, emails, use_llm=use_llm)
         results[name] = r
         print(f"\n{name.upper()}")
         print(f"  confusion   TP {r['tp']}   FN {r['fn']}   FP {r['fp']}   TN {r['tn']}")
@@ -201,11 +204,9 @@ def main() -> None:
     print("=" * 66)
     print(f"EVAL 2 — transcript judge   ({len(transcripts)} labeled call transcripts)")
     print("=" * 66)
-    models_iter = iter(args.model or ([config.NEMOTRON_MODEL] if live else []))
-    for name, use_llm in conditions:
-        if use_llm:
-            config.NEMOTRON_MODEL = next(models_iter, config.NEMOTRON_MODEL)
-        j = judge_eval(transcripts, use_llm=use_llm)
+    for name, use_llm, model in conditions:
+        with llm.model_override(model):
+            j = judge_eval(transcripts, use_llm=use_llm)
         results[f"judge:{name}"] = j
         print(f"\n{name.upper()}")
         print(bar("accuracy", j["accuracy"]))
@@ -222,9 +223,16 @@ def main() -> None:
 
     if args.json:
         Path("evals/results.json").write_text(
-            json.dumps({k: {kk: vv for kk, vv in v.items() if kk != "rows"} for k, v in results.items()},
-                       indent=2, default=str)
+            json.dumps(_json_results(results), indent=2)
         )
+
+    escaped = sum(len(result["escaped"]) for name, result in results.items() if not name.startswith("judge:"))
+    judge_errors = sum(
+        1 for name, result in results.items() if name.startswith("judge:")
+        for row in result["rows"] if row["truth"] != row["pred"]
+    )
+    if args.check and (escaped or judge_errors):
+        raise SystemExit(f"eval check failed: {escaped} fraud escapes, {judge_errors} judge errors")
 
 
 if __name__ == "__main__":

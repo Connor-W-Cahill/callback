@@ -34,12 +34,13 @@ class CallResult:
 def script_for(vendor: dict, extraction) -> str:
     """What the agent says. Short, states its purpose, asks a closed question."""
     last4 = extraction.bank_account[-4:] if extraction.bank_account else "unknown"
+    routing = f" and routing number {extraction.bank_routing}" if extraction.bank_routing else ""
     return (
         f"Hello, this is an automated payment verification call for "
         f"{vendor['name']}. We received an email request to change the bank account "
-        f"we use to pay your invoices, to an account ending {last4}. "
+        f"we use to pay your invoices, to an account ending {last4}{routing}. "
         f"We are calling the number we have on file to confirm. "
-        f"Did your company send that request?"
+        f"Did your company send that request, and are these payment details correct?"
     )
 
 

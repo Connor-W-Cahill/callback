@@ -1,5 +1,6 @@
 const $ = (s) => document.querySelector(s);
 let selected = null;
+let demoMode = true;
 
 const money = (n) => (n == null ? "" : n.toLocaleString("en-US", { style: "currency", currency: "USD" }));
 
@@ -45,7 +46,9 @@ async function loadMailbox() {
 
 async function loadStatus() {
   const s = await api("/api/status");
-  $("#status").textContent = `nemotron: ${s.nemotron} · voice: ${s.elevenlabs}`;
+  demoMode = s.demo_mode;
+  $("#reset").hidden = !demoMode;
+  $("#status").textContent = `${demoMode ? "Demo" : "Live"} · nemotron: ${s.nemotron} · voice: ${s.elevenlabs}`;
 }
 
 let board = { open: { needs_review: [], calling: [], escalated: [] },
@@ -59,7 +62,7 @@ const BUCKETS = [
     ["escalated", "Escalated", "The call settled nothing. A human decides."],
   ]],
   ["settled", "Settled", [
-    ["accepted", "Accepted", "Paid, or the banking change was confirmed by the vendor."],
+    ["accepted", "Accepted", "Cleared for payment, or the banking change was confirmed by the vendor."],
     ["denied", "Denied", "The vendor denied it. The payment is blocked."],
   ]],
   ["extraneous", "Extraneous", null],
@@ -145,11 +148,12 @@ function card(h) {
     held: unknown
       ? '<span class="pill med">unidentified sender</span>'
       : '<span class="pill ' + (high ? "high" : "med") + '">' + (high ? "high risk" : "review") + "</span>",
+    verifying: '<span class="pill held">verifying…</span>',
     calling: '<span class="pill held">calling…</span>',
     escalated: '<span class="pill escalated">escalated</span>',
     approved: '<span class="pill approved">accepted</span>',
     blocked: '<span class="pill blocked">denied</span>',
-    cleared: '<span class="pill approved">paid</span>',
+    cleared: '<span class="pill approved">cleared</span>',
     extraneous: "",
   };
   const pill = pills[h.status] || "";
@@ -176,7 +180,7 @@ async function showMessage(id) {
     '<div class="block"><h4>Why it is here</h4><div>' +
     (m.status === "extraneous"
       ? "Nothing in this message concerns money, so it never reached the fraud checks."
-      : "This invoice matched the vendor on file, so it cleared and was paid without friction.") +
+      : "This invoice cleared the checks and is ready for payment. No payment has been sent.") +
     "</div></div>";
 }
 
@@ -188,28 +192,27 @@ async function showDetail(id) {
   const ver = d.verifications[0];
 
   $("#detail").innerHTML = `
-    <h3>${d.vendor_name || "Unrecognised vendor"}</h3>
-    <div class="meta">${d.subject} · from ${d.sender}${
-      d.reply_to && d.reply_to !== d.sender ? ` · reply-to <b style="color:var(--danger)">${d.reply_to}</b>` : ""
+    <h3>${escapeHtml(d.vendor_name || "Unrecognised vendor")}</h3>
+    <div class="meta">${escapeHtml(d.subject)} · from ${escapeHtml(d.sender)}${
+      d.reply_to && d.reply_to !== d.sender ? ` · reply-to <b style="color:var(--danger)">${escapeHtml(d.reply_to)}</b>` : ""
     }</div>
 
     <div class="block">
       <h4>Why this was held · risk ${d.score}</h4>
-      <div style="margin-bottom:14px">${d.rationale}</div>
-      ${fired.map((s) => `<div class="sig"><span class="dot">▲</span><span>${s.detail}</span></div>`).join("")}
+      <div style="margin-bottom:14px">${escapeHtml(d.rationale)}</div>
+      ${fired.map((s) => `<div class="sig"><span class="dot">▲</span><span>${escapeHtml(s.detail)}</span></div>`).join("")}
     </div>
 
     ${
-      ver
-        ? renderVerification(ver)
-        : `<div class="block" id="callblock">
+      (ver ? renderVerification(ver) : "") +
+      (["held", "escalated"].includes(d.status) ? `<div class="block" id="callblock">
              <h4>Verification</h4>
-             <div class="dial">We will dial <b>${d.phone_on_file}</b>${
-               d.contact_name ? ` (${d.contact_name})` : ""
+             <div class="dial">We will dial <b>${escapeHtml(d.phone_on_file)}</b>${
+               d.contact_name ? ` (${escapeHtml(d.contact_name)})` : ""
              } — the number on file for this vendor, not a number from the email.</div>
              <button id="call">Place verification call</button>
              <div class="note">The email is the channel under attack, so the check has to leave it.</div>
-           </div>`
+           </div>` : `<div class="note">${["calling", "verifying"].includes(d.status) ? "Verification in progress…" : "Verification complete."}</div>`)
     }
 
     <div class="block">
@@ -230,12 +233,26 @@ async function openCall(id) {
   const btn = $("#call");
   btn.disabled = true;
   btn.textContent = "Dialling…";
-  const call = await api(`/api/holds/${id}/call`, { method: "POST" });
+  let call;
+  try {
+    if (!demoMode) {
+      await api(`/api/holds/${id}/dial`, { method: "POST" });
+      await load();
+      await showDetail(id);
+      return;
+    }
+    call = await api(`/api/holds/${id}/call`, { method: "POST" });
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "Retry verification call";
+    showError(e);
+    return;
+  }
 
   $("#callblock").innerHTML = `
     <h4>Call in progress</h4>
-    <div class="dial">Ringing <b>${call.dialed_number}</b>${
-      call.contact_name ? ` — ${call.contact_name}` : ""
+    <div class="dial">Ringing <b>${escapeHtml(call.dialed_number)}</b>${
+      call.contact_name ? ` — ${escapeHtml(call.contact_name)}` : ""
     }, the number on file. Not a number from the email.</div>
     <div class="transcript"><span class="agent">AGENT:</span> ${escapeHtml(call.agent_line)}</div>
     ${call.agent_audio_inline || call.agent_audio
@@ -367,7 +384,7 @@ function renderVerification(v) {
       <span class="pill ${v.judgment === "denied" ? "blocked" : v.judgment === "confirmed" ? "approved" : "escalated"}">${v.judgment}</span>
       <strong>${label}</strong>
     </div>
-    <div class="dial">Dialled <b>${v.dialed_number}</b> — the number on file, not one from the email.
+    <div class="dial">Dialled <b>${escapeHtml(v.dialed_number)}</b> — the number on file, not one from the email.
       ${sourceLabel(v.reply_source)}</div>
     <div class="transcript">${transcript}</div>
     ${v.judgment === "unclear" ? `<div class="note warn">Inconclusive means the vendor neither confirmed nor
@@ -391,20 +408,38 @@ function showReplyError(msg) {
 }
 
 function sourceLabel(src) {
+  if (src === "phone") return '<span class="src live">recorded phone call</span>';
   if (src === "spoken") return '<span class="src live">transcribed from speech</span>';
   if (src === "typed") return '<span class="src">typed reply</span>';
   return '<span class="src">scripted reply</span>';
 }
 
 function escapeHtml(s) {
-  return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function showError(error) {
+  const el = $("#error");
+  el.textContent = `Could not complete the request: ${error.message || error}`;
+  el.hidden = false;
 }
 
 $("#reset").addEventListener("click", async () => {
-  selected = null;
-  $("#detail").innerHTML = '<div class="empty">Select a held payment to see why it was stopped.</div>';
-  await api("/api/reset", { method: "POST" });
-  await load();
+  const button = $("#reset");
+  button.disabled = true;
+  button.textContent = "Resetting…";
+  try {
+    selected = null;
+    $("#detail").innerHTML = '<div class="empty">Select a held payment to see why it was stopped.</div>';
+    await api("/api/reset", { method: "POST" });
+    await load();
+    $("#error").hidden = true;
+  } catch (e) {
+    showError(e);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Reset demo";
+  }
 });
 
 // A reload shows what actually happened -- nothing more. The queue fills from
@@ -416,19 +451,25 @@ async function boot() {
   await load();
 }
 
-boot();
+boot().catch(showError);
 
 // New mail arrives on its own schedule, so the queue has to notice.
+let polling = false;
 setInterval(async () => {
-  if (!$("#view-engine").hidden) return;
-  const before = countOf("open:needs_review") + countOf("open:calling");
-  await loadMailbox();
-  await load();
-  if (countOf("open:needs_review") + countOf("open:calling") > before) {
-    const bar = $("#mailbar");
-    bar.classList.add("flash");
-    setTimeout(() => bar.classList.remove("flash"), 1200);
-  }
+  if (polling || !$("#view-engine").hidden) return;
+  polling = true;
+  try {
+    const before = countOf("open:needs_review") + countOf("open:calling");
+    await loadMailbox();
+    await load();
+    if (!demoMode && selected?.startsWith("hold-")) await showDetail(selected);
+    if (countOf("open:needs_review") + countOf("open:calling") > before) {
+      const bar = $("#mailbar");
+      bar.classList.add("flash");
+      setTimeout(() => bar.classList.remove("flash"), 1200);
+    }
+  } catch (e) { showError(e); }
+  finally { polling = false; }
 }, 5000);
 
 
@@ -467,11 +508,11 @@ async function renderVendors() {
         account here is what a payment-change request gets compared to — edit it and
         the same email scores differently. Add a vendor whose domain matches a real
         address to make mail from it resolve to a known supplier instead of a stranger.</p>
-      <button id="addvendor">Add vendor</button>
+      ${demoMode ? '<button id="addvendor">Add vendor</button>' : '<p>Vendor details are read-only in live mode.</p>'}
       <div class="vlist">${vendors.map(vendorCard).join("")}</div>
     </div>`;
 
-  $("#addvendor").addEventListener("click", () => {
+  $("#addvendor")?.addEventListener("click", () => {
     editing = "__new__";
     renderVendorForm();
   });
@@ -485,7 +526,7 @@ async function renderVendors() {
     b.addEventListener("click", async () => {
       const v = vendors.find((x) => x.id === b.dataset.del);
       if (!confirm(`Delete ${v.name}? Its payment history and any holds go too.`)) return;
-      await fetch(`/api/vendors/${b.dataset.del}`, { method: "DELETE" });
+      await api(`/api/vendors/${b.dataset.del}`, { method: "DELETE" });
       await renderVendors();
       await load();
     })
@@ -498,8 +539,8 @@ function vendorCard(v) {
       <b>${escapeHtml(v.name)}</b>
       ${v.custom ? '<span class="pill held">edited</span>' : ""}
       <span class="grow"></span>
-      <button class="ghost" data-edit="${v.id}">Edit</button>
-      <button class="ghost" data-del="${v.id}">Delete</button>
+      ${demoMode ? `<button class="ghost" data-edit="${escapeHtml(v.id)}">Edit</button>
+      <button class="ghost" data-del="${escapeHtml(v.id)}">Delete</button>` : ""}
     </div>
     <div class="vgrid">
       <div><span>Account on file</span><code>${escapeHtml(v.account)}</code></div>

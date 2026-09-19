@@ -5,6 +5,7 @@ escalates to a human rather than guessing -- an ambiguous phone call is not
 authorisation to move money.
 """
 from dataclasses import dataclass
+import re
 
 from src import llm
 
@@ -31,13 +32,14 @@ DENY_CUES = [
     "still the same", "no change", "that's not our", "not our account", "fraud",
 ]
 CONFIRM_CUES = [
-    "yes we sent", "that was us", "we did send", "confirm", "that's correct",
+    "yes we sent", "that was us", "we did send", "confirm, yes", "confirm yes", "that's correct",
     "correct, we", "yes that's right", "we switched", "we changed our bank",
 ]
 UNCLEAR_CUES = [
     "voicemail", "leave a message", "not available", "wrong number",
     "i'd have to check", "let me look into", "i'm not sure", "not sure",
-    "new here", "can you email", "i think so",
+    "new here", "can you email", "i think so", "cannot confirm", "can't confirm",
+    "cannot say", "can't say", "did not say", "didn't say",
 ]
 
 
@@ -61,12 +63,20 @@ class Judgment:
 
 
 def judge(transcript: str) -> Judgment:
+    vendor_text = vendor_turns(transcript)
+    if not vendor_text.strip():
+        return Judgment("unclear", "", "no vendor statement in the transcript", "rules")
+    safety = _safety_judgment(vendor_text)
+    if safety:
+        return safety
     try:
-        data = llm.complete_json(SYSTEM, f"Transcript:\n\n{transcript}",
+        data = llm.complete_json(SYSTEM, f"Vendor statement:\n\n{vendor_text}",
                                  job="judge", schema=SCHEMA)
         j = str(data.get("judgment", "")).lower().strip()
         if j not in ("confirmed", "denied", "unclear"):
             raise llm.LLMUnavailable(f"bad judgment {j!r}")
+        if j == "confirmed" and judge_rules(transcript).judgment != "confirmed":
+            return Judgment("unclear", "", "Model confirmation lacks explicit confirmation evidence; human review required.", "policy")
         return Judgment(
             judgment=j,
             quote=str(data.get("quote", ""))[:400],
@@ -83,11 +93,17 @@ def vendor_turns(transcript: str) -> str:
     The agent's own script contains words like "confirm", so scanning the whole
     transcript lets the agent answer its own question. Found by eval case t-15.
     """
-    lines = [
-        line.split(":", 1)[1] for line in transcript.splitlines()
-        if line.strip().upper().startswith("VENDOR:")
-    ]
-    return "\n".join(lines) if lines else transcript
+    lines = []
+    in_vendor_turn = False
+    for line in transcript.splitlines():
+        match = re.match(r"^\s*([A-Za-z][A-Za-z _-]*):\s*(.*)$", line)
+        if match:
+            in_vendor_turn = match.group(1).strip().upper() == "VENDOR"
+            if in_vendor_turn:
+                lines.append(match.group(2))
+        elif in_vendor_turn:
+            lines.append(line)
+    return "\n".join(lines)
 
 
 def judge_rules(transcript: str) -> Judgment:
@@ -96,18 +112,27 @@ def judge_rules(transcript: str) -> Judgment:
     Ordering matters: an explicit denial outranks hedging, and hedging outranks
     a confirmation cue, because 'I think so' is not authorisation.
     """
-    low = vendor_turns(transcript).lower()
+    vendor_text = vendor_turns(transcript)
+    safety = _safety_judgment(vendor_text)
+    if safety:
+        return safety
 
-    for cue in DENY_CUES:
-        if cue in low:
-            return Judgment("denied", _line_with(transcript, cue), f"vendor said {cue!r}", "rules")
-    for cue in UNCLEAR_CUES:
-        if cue in low:
-            return Judgment("unclear", _line_with(transcript, cue), f"hedged or unavailable: {cue!r}", "rules")
+    low = vendor_text.lower()
     for cue in CONFIRM_CUES:
         if cue in low:
-            return Judgment("confirmed", _line_with(transcript, cue), f"vendor said {cue!r}", "rules")
+            return Judgment("confirmed", _line_with(vendor_text, cue), f"vendor said {cue!r}", "rules")
     return Judgment("unclear", "", "no clear confirmation or denial in the transcript", "rules")
+
+
+def _safety_judgment(vendor_text: str) -> Judgment | None:
+    low = vendor_text.lower()
+    for cue in DENY_CUES:
+        if cue in low:
+            return Judgment("denied", _line_with(vendor_text, cue), f"vendor said {cue!r}", "rules")
+    for cue in UNCLEAR_CUES:
+        if cue in low:
+            return Judgment("unclear", _line_with(vendor_text, cue), f"hedged or unavailable: {cue!r}", "rules")
+    return None
 
 
 def _line_with(transcript: str, cue: str) -> str:

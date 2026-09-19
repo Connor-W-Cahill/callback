@@ -69,8 +69,9 @@ actual outbound call to the vendor's number on file, records the answer, runs it
 through ElevenLabs STT and Nemotron's judge, and resolves the hold — with no
 human touching the browser.
 
-It is **off by default and gated twice**: all four Twilio settings must be
-present *and* `CALLBACK_AUTO_CALL=1`. Placing real calls is the only thing this
+It is **off by default**: all four Twilio settings must be present, live mode
+(`CALLBACK_DEMO=0`) and an API password must be configured, and automatic dialing
+also requires `CALLBACK_AUTO_CALL=1`. Placing real calls is the only thing this
 project does with consequences outside the laptop, and an inbound email is an
 untrusted trigger. The number still comes from the vendor master; nothing in an
 email ever chooses who gets dialed.
@@ -101,10 +102,12 @@ to break on stage.
    TWILIO_FROM=+1...
    PUBLIC_BASE_URL=https://<your-tunnel>.trycloudflare.com
    CALLBACK_AUTO_CALL=1
+   CALLBACK_DEMO=0
+   CALLBACK_API_PASSWORD=<choose-a-strong-password>
    ```
 4. **Set a vendor's phone to a real number you control.** The seeded numbers are
-   555 placeholders and are unroutable — auto-dialing them does nothing. Use the
-   Vendors tab.
+   555 placeholders and are unroutable. Use the Vendors tab in demo mode to prepare
+   the trusted record before restarting in live mode.
 
 Webhooks verify Twilio's `X-Twilio-Signature` and reject anything unsigned:
 `/api/twilio/recording` acts on what it receives, so an unsigned caller could
@@ -300,3 +303,42 @@ scan to `VENDOR:` turns.
 
 Working end to end. Pipeline, API, UI, and both evals run. Not built: live IMAP,
 auth, real payment rails, PDF OCR.
+
+## Verification safeguards and tests
+
+Run the regression suite and deterministic evaluation without external calls:
+
+```bash
+NVIDIA_API_KEY='' ELEVENLABS_API_KEY='' CALLBACK_EMAIL=0 .venv/bin/python -m unittest discover -s tests -v
+NVIDIA_API_KEY='' ELEVENLABS_API_KEY='' CALLBACK_EMAIL=0 .venv/bin/python evals/run_eval.py --check
+node --check web/app.js
+node --test tests/test_web.cjs
+```
+
+The evaluation now uses the production pipeline with a fixed evaluation date.
+An explicit `--model` selects that exact model for every job; unavailable models
+fall back to rules, not a different model. JSON results include serializable
+confusion matrices. Regression tests cover contradictory extraction, routing-only
+changes, uncertain replies, concurrent verification, transactional rollback,
+duplicate recordings, and API access controls.
+
+`CALLBACK_DEMO=1` is the default: browser speech, typed replies, scripted answers,
+vendor editing and reset remain available for synthetic demos. To restrict the
+app to actual phone verification, set `CALLBACK_DEMO=0` and a strong
+`CALLBACK_API_PASSWORD`. API access then requires HTTP Basic authentication (any
+username, configured password); use HTTPS for remote access. Missing credentials
+fail closed. Live mode disables demo replies, reset, and vendor mutations; prepare
+the trusted vendor master before switching modes. Real dialing requires live mode and a password, including automatic calls.
+Signed Twilio recordings must match the attempt token and call SID stored for
+the hold; the attempt token is saved before dialing so fast callbacks work. Real calls use Twilio speech so they do
+not need to fetch protected audio; ElevenLabs still transcribes the response.
+
+Settled holds cannot be reverified. An inconclusive or failed verification remains
+escalated and may be retried. Verification outcomes, bank changes and their audit
+entries commit together. Conflicting extracted payment details require human
+review. Uploads read by the verification handler are capped at 10 MiB.
+
+These controls do not add payment execution, multi-user roles, or durable Vercel
+storage. Use persistent local storage for live-mode work; the deployed serverless
+version remains a disposable synthetic demo. The queue labels cleared invoices
+as ready for payment, never as paid.

@@ -118,6 +118,91 @@ def check_voice() -> None:
         bad(f"voice list failed: {e}")
 
 
+def check_twilio() -> bool:
+    print("\nTWILIO (phase 4 — real phone calls)")
+    from src.voice import telephony
+
+    missing = [
+        n for n, v in (
+            ("TWILIO_ACCOUNT_SID", config.TWILIO_SID),
+            ("TWILIO_AUTH_TOKEN", config.TWILIO_TOKEN),
+            ("TWILIO_FROM", config.TWILIO_FROM),
+            ("PUBLIC_BASE_URL", config.PUBLIC_BASE_URL),
+        ) if not v
+    ]
+    if missing:
+        bad(f"not configured — missing {', '.join(missing)}")
+        print("     (the browser-based callback still works; this is optional)")
+        return False
+
+    try:
+        r = httpx.get(
+            f"https://api.twilio.com/2010-04-01/Accounts/{config.TWILIO_SID}.json",
+            auth=(config.TWILIO_SID, config.TWILIO_TOKEN), timeout=20,
+        )
+        if r.status_code != 200:
+            bad(f"credentials rejected: {r.status_code} {r.text[:120]}")
+            return False
+        acct = r.json()
+        ok(f"account '{acct.get('friendly_name')}' — type: {acct.get('type')}, status: {acct.get('status')}")
+        if acct.get("type") == "Trial":
+            bad("TRIAL account: Twilio speaks a trial notice BEFORE your audio, and")
+            print("     you can only call numbers you have verified. Upgrade before demoing.")
+    except Exception as e:
+        bad(f"could not reach Twilio: {e}")
+        return False
+
+    # Does the From number actually belong to this account?
+    try:
+        r = httpx.get(
+            f"https://api.twilio.com/2010-04-01/Accounts/{config.TWILIO_SID}/IncomingPhoneNumbers.json",
+            auth=(config.TWILIO_SID, config.TWILIO_TOKEN), timeout=20,
+        )
+        nums = [n["phone_number"] for n in r.json().get("incoming_phone_numbers", [])]
+        if config.TWILIO_FROM in nums:
+            ok(f"caller id {config.TWILIO_FROM} is owned by this account")
+        else:
+            bad(f"TWILIO_FROM {config.TWILIO_FROM} is not on this account. Owned: {nums or 'none — buy a number'}")
+            return False
+    except Exception as e:
+        bad(f"could not list numbers: {e}")
+
+    # Twilio must be able to reach us, or the recording never comes back.
+    try:
+        u = config.PUBLIC_BASE_URL + "/api/status"
+        r = httpx.get(u, timeout=15)
+        if r.status_code == 200:
+            ok(f"Twilio can reach {config.PUBLIC_BASE_URL} (tunnel is up)")
+        else:
+            bad(f"{u} returned {r.status_code} — Twilio will not be able to post recordings back")
+    except Exception as e:
+        bad(f"PUBLIC_BASE_URL unreachable: {str(e)[:90]}")
+        print("     Start a tunnel, then set PUBLIC_BASE_URL to the https URL it prints.")
+        return False
+
+    if not config.AUTO_CALL:
+        print("  \033[33m!\033[0m configured, but CALLBACK_AUTO_CALL=0 — inbound email will NOT auto-dial.")
+        print("     Set CALLBACK_AUTO_CALL=1 to arm it.")
+    else:
+        ok("auto-call ARMED: held inbound email will place a real call")
+
+    # The seeded 555 numbers are unroutable; auto-dial would silently do nothing.
+    try:
+        from src import db
+        c = db.connect(); db.init(c)
+        reals = [v for v in db.vendors(c) if not v["phone_on_file"].replace("-", "").replace(" ", "").startswith("+1412555")
+                 and "555" not in v["phone_on_file"]]
+        if reals:
+            ok(f"{len(reals)} vendor(s) have a non-placeholder phone: "
+               f"{', '.join(v['name'] + ' ' + v['phone_on_file'] for v in reals[:3])}")
+        else:
+            bad("every vendor still has a 555 placeholder number — auto-dial will reach nobody.")
+            print("     Set a real number you control on a vendor in the Vendors tab.")
+    except Exception:
+        pass
+    return True
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("CALLBACK PREFLIGHT")
@@ -125,6 +210,7 @@ if __name__ == "__main__":
     n = check_nemotron()
     e = check_elevenlabs()
     check_voice()
+    check_twilio()
     print("\n" + "=" * 60)
     if n and e:
         print("Both services live. The demo will use real Nemotron and real voice.")

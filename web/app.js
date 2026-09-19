@@ -1,6 +1,17 @@
 const $ = (s) => document.querySelector(s);
 let selected = null;
 let demoMode = true;
+const emptyDeskMarkup = $("#detail").innerHTML;
+
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $("#dark-mode").checked = theme === "dark";
+  $('meta[name="theme-color"]').content = theme === "dark" ? "#191b19" : "#f5f2eb";
+  try { localStorage.setItem("callback-theme", theme); } catch { /* Still works for this visit. */ }
+}
+
+$("#dark-mode").checked = document.documentElement.dataset.theme !== "light";
+$("#dark-mode").addEventListener("change", event => setTheme(event.target.checked ? "dark" : "light"));
 
 const money = (n) => (n == null ? "" : n.toLocaleString("en-US", { style: "currency", currency: "USD" }));
 
@@ -28,7 +39,7 @@ async function loadMailbox() {
   bar.hidden = false;
   bar.innerHTML = `
     <span class="live-dot"></span>
-    <span>Live inbox — email this address and it lands in the queue:</span>
+    <span class="mail-label">Receiving at</span>
     <code id="mailaddr">${escapeHtml(m.address)}</code>
     <button id="copyaddr" class="ghost">Copy</button>
     <span class="grow"></span>
@@ -48,7 +59,8 @@ async function loadStatus() {
   const s = await api("/api/status");
   demoMode = s.demo_mode;
   $("#reset").hidden = !demoMode;
-  $("#status").textContent = `${demoMode ? "Demo" : "Live"} · nemotron: ${s.nemotron} · voice: ${s.elevenlabs}`;
+  $("#status").textContent = demoMode ? "Demo workspace" : "Live workspace";
+  $("#status").title = `Nemotron: ${s.nemotron} · Voice: ${s.elevenlabs}`;
 }
 
 let board = { open: { needs_review: [], calling: [], escalated: [] },
@@ -87,6 +99,9 @@ function countOf(key) {
 
 async function load() {
   board = await api("/api/board");
+  $("#queue-summary").innerHTML = [
+    ["open:needs_review", "Needs review"], ["open:calling", "On a call"], ["open:escalated", "Escalated"],
+  ].map(([key, label]) => `<div><strong>${String(countOf(key)).padStart(2, "0")}</strong><span>${label}</span></div>`).join("");
   renderSubtabs();
   renderBucket();
 }
@@ -99,7 +114,7 @@ function renderSubtabs() {
       ? subs.reduce((n, x) => n + countOf(top + ":" + x[0]), 0)
       : countOf(top);
     const firstKey = subs ? top + ":" + subs[0][0] : top;
-    return '<button class="stab ' + (top === curTop ? "active" : "") + '" data-b="' + firstKey + '">' +
+    return '<button class="stab ' + (top === curTop ? "active" : "") + '" data-b="' + firstKey + '" aria-pressed="' + (top === curTop) + '">' +
       label + (total ? ' <span class="n">' + total + "</span>" : "") + "</button>";
   }).join("");
 
@@ -108,7 +123,7 @@ function renderSubtabs() {
     html += '<div class="subsub">' + grp[2].map(function (x) {
       const key = curTop + ":" + x[0];
       const n = countOf(key);
-      return '<button class="ssub ' + (bucket === key ? "active" : "") + '" data-b="' + key + '">' +
+      return '<button class="ssub ' + (bucket === key ? "active" : "") + '" data-b="' + key + '" aria-pressed="' + (bucket === key) + '">' +
         x[1] + (n ? ' <span class="n">' + n + "</span>" : "") + "</button>";
     }).join("") + "</div>";
   }
@@ -118,7 +133,7 @@ function renderSubtabs() {
     b.addEventListener("click", () => {
       bucket = b.dataset.b;
       selected = null;
-      $("#detail").innerHTML = '<div class="empty">Select an item to see the detail.</div>';
+      $("#detail").innerHTML = emptyDeskMarkup;
       renderSubtabs();
       renderBucket();
     })
@@ -131,12 +146,16 @@ function renderBucket() {
     '<p class="blurb">' + bucketBlurb(bucket) + "</p>" +
     (items.length
       ? items.map(card).join("")
-      : '<div class="empty">Nothing here. Email <b>the address above</b> and anything about money shows up in Open.</div>');
+      : '<div class="empty">No items in this section. New requests appear here as they arrive.</div>');
 
   document.querySelectorAll(".card").forEach((c) =>
     c.addEventListener("click", () => {
-      if (c.dataset.kind === "hold") showDetail(c.dataset.id);
-      else showMessage(c.dataset.id);
+      const action = c.dataset.kind === "hold" ? showDetail(c.dataset.id) : showMessage(c.dataset.id);
+      action.then(() => {
+        if (window.matchMedia("(max-width: 720px)").matches) {
+          $("#detail").scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
+        }
+      }).catch(showError);
     })
   );
 }
@@ -157,13 +176,13 @@ function card(h) {
     extraneous: "",
   };
   const pill = pills[h.status] || "";
-  return '<div class="card ' + (high && h.status === "held" ? "high " : "") +
-    (unknown ? "unknown " : "") + (selected === h.id ? "sel" : "") +
-    '" data-id="' + h.id + '" data-kind="' + h.kind + '">' +
-    '<div class="vendor">' + escapeHtml(h.vendor_name || senderName(h.sender)) + " " + pill + "</div>" +
-    '<div class="sub">' + escapeHtml(h.subject || "(no subject)") + " · " + escapeHtml(h.sender || "") + "</div>" +
-    (h.rationale ? '<div class="why">' + escapeHtml(h.rationale) + "</div>" : "") +
-    "</div>";
+  return `<button type="button" class="card ${high && h.status === "held" ? "high" : ""} ${unknown ? "unknown" : ""} ${selected === h.id ? "sel" : ""}"
+    data-id="${escapeHtml(h.id)}" data-kind="${escapeHtml(h.kind)}" aria-pressed="${selected === h.id}">
+    <span class="card-top"><span class="card-ref">${escapeHtml(h.id.replace(/^hold-/, ""))}</span>${pill}</span>
+    <span class="vendor">${escapeHtml(h.vendor_name || senderName(h.sender))}</span>
+    <span class="sub">${escapeHtml(h.subject || "(no subject)")}</span>
+    ${h.rationale ? `<span class="why">${escapeHtml(h.rationale)}</span>` : ""}
+  </button>`;
 }
 
 function senderName(s) {
@@ -173,10 +192,12 @@ function senderName(s) {
 async function showMessage(id) {
   selected = id;
   const msgs = await api("/api/messages");
+  if (selected !== id) return;
   const m = msgs.find((x) => x.id === id) || {};
   $("#detail").innerHTML =
+    '<div class="detail-head"><p class="eyebrow">Correspondence</p>' +
     "<h3>" + escapeHtml(senderName(m.sender)) + "</h3>" +
-    '<div class="meta">' + escapeHtml(m.subject || "") + " · from " + escapeHtml(m.sender || "") + "</div>" +
+    '<div class="meta">' + escapeHtml(m.subject || "") + " · from " + escapeHtml(m.sender || "") + "</div></div>" +
     '<div class="block"><h4>Why it is here</h4><div>' +
     (m.status === "extraneous"
       ? "Nothing in this message concerns money, so it never reached the fraud checks."
@@ -186,37 +207,54 @@ async function showMessage(id) {
 
 async function showDetail(id) {
   selected = id;
-  document.querySelectorAll(".card").forEach((c) => c.classList.toggle("sel", c.dataset.id === id));
+  document.querySelectorAll(".card").forEach((c) => {
+    c.classList.toggle("sel", c.dataset.id === id);
+    c.setAttribute("aria-pressed", String(c.dataset.id === id));
+  });
   const d = await api(`/api/holds/${id}`);
   const fired = d.signals.filter((s) => s.fired);
+  if (selected !== id) return;
   const ver = d.verifications[0];
+  const account = value => value ? `•••• ${escapeHtml(String(value).slice(-4))}` : "Not specified";
+  const signalRow = signal => `<div class="sig"><span class="dot" aria-hidden="true">↳</span><span>${escapeHtml(signal.detail)}</span></div>`;
 
   $("#detail").innerHTML = `
-    <h3>${escapeHtml(d.vendor_name || "Unrecognised vendor")}</h3>
-    <div class="meta">${escapeHtml(d.subject)} · from ${escapeHtml(d.sender)}${
-      d.reply_to && d.reply_to !== d.sender ? ` · reply-to <b style="color:var(--danger)">${escapeHtml(d.reply_to)}</b>` : ""
-    }</div>
+    <div class="detail-head">
+      <div class="case-caption"><span class="folio">Review / ${escapeHtml(id.replace(/^hold-/, ""))}</span><span class="folio">${escapeHtml(d.status)}</span></div>
+      <h3>${escapeHtml(d.vendor_name || "Unrecognised vendor")}</h3>
+      <div class="meta-subject">${escapeHtml(d.subject)}</div>
+      <div class="meta">From ${escapeHtml(d.sender)}${
+        d.reply_to && d.reply_to !== d.sender ? ` · Reply to <span class="fail">${escapeHtml(d.reply_to)}</span>` : ""
+      }</div>
+    </div>
 
+    <div class="account-comparison" aria-label="Payment account comparison">
+      <div><span>Account on file</span><strong>${account(d.vendor_account)}</strong></div>
+      <span class="comparison-arrow" aria-hidden="true">→</span>
+      <div><span>Account requested</span><strong>${account(d.extracted?.bank_account)}</strong></div>
+      ${d.extracted?.amount != null ? `<div class="invoice-amount"><span>Invoice amount</span><strong>${money(d.extracted.amount)}</strong></div>` : ""}
+    </div>
     <div class="block">
-      <h4>Why this was held · risk ${d.score}</h4>
-      <div style="margin-bottom:14px">${escapeHtml(d.rationale)}</div>
-      ${fired.map((s) => `<div class="sig"><span class="dot">▲</span><span>${escapeHtml(s.detail)}</span></div>`).join("")}
+      <h4><span class="section-no">01</span>Review notes <span class="risk-readout">Risk ${d.score}</span></h4>
+      <div class="rationale">${escapeHtml(d.rationale)}</div>
+      ${fired.slice(0, 2).map(signalRow).join("")}
+      ${fired.length > 2 ? `<details class="more-signals"><summary>${fired.length - 2} more signal${fired.length === 3 ? "" : "s"}</summary>${fired.slice(2).map(signalRow).join("")}</details>` : ""}
     </div>
 
     ${
       (ver ? renderVerification(ver) : "") +
       (["held", "escalated"].includes(d.status) ? `<div class="block" id="callblock">
-             <h4>Verification</h4>
-             <div class="dial">We will dial <b>${escapeHtml(d.phone_on_file)}</b>${
+             <h4><span class="section-no">02</span>Verify with the vendor</h4>
+             <div class="dial">On-file number <b>${escapeHtml(d.phone_on_file)}</b>${
                d.contact_name ? ` (${escapeHtml(d.contact_name)})` : ""
-             } — the number on file for this vendor, not a number from the email.</div>
+             }. This contact comes from your vendor record.</div>
              <button id="call">Place verification call</button>
-             <div class="note">The email is the channel under attack, so the check has to leave it.</div>
+             <div class="note">Confirm the request and the payment details before making a change.</div>
            </div>` : `<div class="note">${["calling", "verifying"].includes(d.status) ? "Verification in progress…" : "Verification complete."}</div>`)
     }
 
     <div class="block">
-      <h4>The message</h4>
+      <h4><span class="section-no">03</span>Original message</h4>
       <div class="email">${escapeHtml(d.body)}</div>
     </div>`;
 
@@ -249,9 +287,10 @@ async function openCall(id) {
     return;
   }
 
+  if (selected !== id) return;
   $("#callblock").innerHTML = `
-    <h4>Call in progress</h4>
-    <div class="dial">Ringing <b>${escapeHtml(call.dialed_number)}</b>${
+    <h4>Demo verification</h4>
+    <div class="dial">Contact on file <b>${escapeHtml(call.dialed_number)}</b>${
       call.contact_name ? ` — ${escapeHtml(call.contact_name)}` : ""
     }, the number on file. Not a number from the email.</div>
     <div class="transcript"><span class="agent">AGENT:</span> ${escapeHtml(call.agent_line)}</div>
@@ -262,12 +301,12 @@ async function openCall(id) {
       <h4 style="margin-top:18px">The vendor answers</h4>
       ${
         call.stt_available
-          ? `<button id="rec">● Hold the mic — record the reply</button>
+          ? `<button id="rec">Record the reply</button>
              <span id="recstate" class="note" style="margin-left:10px"></span>`
-          : `<div class="note" style="margin-bottom:10px">No ELEVENLABS_API_KEY set, so speech-to-text is
-             unavailable. Type the vendor's reply instead — the judge cannot tell the difference.</div>`
+          : `<div class="note" style="margin-bottom:10px">Speech recording is unavailable in this demo. Enter the vendor’s reply below.</div>`
       }
-      <textarea id="typed" rows="3" placeholder="…or type what the vendor says"></textarea>
+      <label class="reply-label" for="typed">Vendor’s reply</label>
+      <textarea id="typed" rows="3" placeholder="Enter the vendor’s exact words…"></textarea>
       <div class="row-btns">
         <button id="submitreply">Submit reply</button>
         <button id="useseed" class="ghost">Use the scripted reply</button>
@@ -351,26 +390,33 @@ async function sendReply(id, { blob, seeded } = {}) {
   if (blob) fd.append("audio", blob, "reply.webm");
   else if (!seeded) {
     const typed = $("#typed").value.trim();
-    if (typed) fd.append("text", typed);
+    if (!typed) {
+      showReplyError("Enter a reply, record one, or choose the scripted reply.");
+      return;
+    }
+    fd.append("text", typed);
   }
 
-  let r;
+  const buttons = [...document.querySelectorAll("#callblock button")];
+  buttons.forEach(button => button.disabled = true);
+  const submit = $("#submitreply");
+  if (submit) submit.textContent = "Reviewing reply…";
   try {
-    r = await fetch(`/api/holds/${id}/reply`, { method: "POST", body: fd });
+    const r = await fetch(`/api/holds/${id}/reply`, { method: "POST", body: fd });
+    if (!r.ok) {
+      let msg = await r.text();
+      try { msg = JSON.parse(msg).detail || msg; } catch {}
+      throw new Error(msg);
+    }
+    await load();
+    if (selected === id) await showDetail(id);
   } catch (e) {
-    showReplyError(`network error: ${e.message}`);
-    return;
+    if (selected === id) showReplyError(e.message);
+    else showError(e);
+  } finally {
+    buttons.forEach(button => button.disabled = false);
+    if (submit) submit.textContent = "Submit reply";
   }
-  if (!r.ok) {
-    let msg = await r.text();
-    try {
-      msg = JSON.parse(msg).detail || msg;
-    } catch (e) {}
-    showReplyError(msg);
-    return;
-  }
-  await load();
-  await showDetail(id);
 }
 
 function renderVerification(v) {
@@ -379,7 +425,7 @@ function renderVerification(v) {
     .replace(/^AGENT:/gm, '<span class="agent">AGENT:</span>')
     .replace(/^VENDOR:/gm, '<span class="vendor">VENDOR:</span>');
   return `<div class="block">
-    <h4>Verification call</h4>
+    <h4><span class="section-no">02</span>Verification record</h4>
     <div class="verdict">
       <span class="pill ${v.judgment === "denied" ? "blocked" : v.judgment === "confirmed" ? "approved" : "escalated"}">${v.judgment}</span>
       <strong>${label}</strong>
@@ -430,7 +476,7 @@ $("#reset").addEventListener("click", async () => {
   button.textContent = "Resetting…";
   try {
     selected = null;
-    $("#detail").innerHTML = '<div class="empty">Select a held payment to see why it was stopped.</div>';
+    $("#detail").innerHTML = emptyDeskMarkup;
     await api("/api/reset", { method: "POST" });
     await load();
     $("#error").hidden = true;
@@ -486,12 +532,16 @@ const JOBS = {
 };
 
 function switchView(view) {
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.classList.toggle("active", t.dataset.view === view);
+    if (t.dataset.view === view) t.setAttribute("aria-current", "page");
+    else t.removeAttribute("aria-current");
+  });
   $("#view-queue").hidden = view !== "queue";
   $("#view-vendors").hidden = view !== "vendors";
   $("#view-engine").hidden = view !== "engine";
-  if (view === "engine") renderEngine();
-  if (view === "vendors") renderVendors();
+  if (view === "engine") renderEngine().catch(showError);
+  if (view === "vendors") renderVendors().catch(showError);
 }
 
 // --- vendor master -------------------------------------------------------
@@ -503,12 +553,9 @@ async function renderVendors() {
   vendors = await api("/api/vendors");
   $("#view-vendors").innerHTML = `
     <div class="engine-inner">
-      <h2>Vendor master</h2>
-      <p class="lede">The record every inbound email is checked against. The bank
-        account here is what a payment-change request gets compared to — edit it and
-        the same email scores differently. Add a vendor whose domain matches a real
-        address to make mail from it resolve to a known supplier instead of a stranger.</p>
-      ${demoMode ? '<button id="addvendor">Add vendor</button>' : '<p>Vendor details are read-only in live mode.</p>'}
+      <div class="section-heading"><div><p class="eyebrow">The source of truth</p><h2>Vendor master</h2>
+      <p class="lede">Known contacts and payment details. Every incoming request is checked against this record.</p></div>
+      ${demoMode ? '<button id="addvendor">Add vendor <span aria-hidden="true">+</span></button>' : '<span class="folio">Read-only in live mode</span>'}</div>
       <div class="vlist">${vendors.map(vendorCard).join("")}</div>
     </div>`;
 
@@ -562,15 +609,16 @@ function renderVendorForm() {
 
   $("#view-vendors").innerHTML = `
     <div class="engine-inner">
+      <p class="eyebrow">Vendor record</p>
       <h2>${isNew ? "Add a vendor" : "Edit " + escapeHtml(v.name)}</h2>
       <div class="vform">
         ${field("name", "Vendor name", v.name, "Allegheny Sheet Metal")}
         ${field("contact_name", "Contact", v.contact_name || "", "Denise Perkins")}
         ${field("account", "Bank account on file", v.account, "8841003392",
-                "The signal everything hangs on: a request to pay a different account is what gets held.")}
+                "Payment requests are checked against this account.")}
         ${field("routing", "Routing", v.routing || "", "043000096")}
         ${field("phone_on_file", "Phone to call for verification", v.phone_on_file || "", "+1-412-555-0142",
-                "Never taken from the email. This is the number the voice agent dials.")}
+                "Use a trusted contact. Verification calls go to this number.")}
         ${field("domains", "Domains", (v.domains || []).join(", "), "alleghenysheetmetal.com",
                 "Comma separated. Mail from a near-miss of one of these is flagged as a lookalike.")}
         ${field("known_senders", "Known sender addresses", (v.known_senders || []).join(", "),
@@ -627,9 +675,8 @@ async function renderEngine() {
 
   el.innerHTML = `
     <div class="engine-inner">
-      <h2>What the models are actually doing</h2>
-      <p class="lede">Every call to Nemotron and ElevenLabs, as it happened. Nothing here is
-        a mock — if a row says it succeeded, that request went out and came back.</p>
+      <div class="section-heading"><div><p class="eyebrow">Service journal</p><h2>Under the hood</h2>
+      <p class="lede">A record of the services behind each decision. Requests, responses, and the time between.</p></div><span class="folio">${d.calls.length} recorded attempts</span></div>
       ${outcomeBar(d.outcome)}
 
       <div class="svc">
@@ -651,9 +698,16 @@ async function renderEngine() {
       <div class="log">${d.calls.length ? d.calls.map(callRow).join("") : '<div class="empty">No calls yet — reset the demo or place a verification call.</div>'}</div>
     </div>`;
 
-  el.querySelectorAll(".logrow").forEach((r) =>
-    r.addEventListener("click", () => r.classList.toggle("open"))
-  );
+  el.querySelectorAll(".logrow").forEach((r) => {
+    const toggle = () => {
+      r.classList.toggle("open");
+      r.setAttribute("aria-expanded", String(r.classList.contains("open")));
+    };
+    r.addEventListener("click", toggle);
+    r.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); }
+    });
+  });
 }
 
 function outcomeBar(o) {
@@ -679,7 +733,7 @@ function outcomeBar(o) {
 
 function summaryTable(rows) {
   if (!rows.length) return '<div class="note">No calls yet.</div>';
-  return `<table class="sum">
+  return `<div class="table-scroll"><table class="sum">
     <tr><th>Job</th><th>What it does</th><th>Calls</th><th>Avg</th><th>Model</th></tr>
     ${rows.map((r) => {
       const [name, desc] = JOBS[r.job] || [r.job, ""];
@@ -692,13 +746,13 @@ function summaryTable(rows) {
         <td class="mono">${models || "—"}</td>
       </tr>`;
     }).join("")}
-  </table>`;
+  </table></div>`;
 }
 
 function callRow(c) {
   const [name] = JOBS[c.job] || [c.job];
   const t = new Date(c.at).toLocaleTimeString();
-  return `<div class="logrow ${c.ok ? "" : "bad"}">
+  return `<div class="logrow ${c.ok ? "" : "bad"}" role="button" tabindex="0" aria-expanded="false">
     <div class="head">
       <span class="badge ${c.service}">${c.service}</span>
       <b>${name}</b>

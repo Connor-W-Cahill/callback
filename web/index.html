@@ -1,46 +1,62 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Callback — AP Hold Queue</title>
+<meta name="theme-color" content="#191b19">
+<script id="theme-init">
+  try {
+    if (localStorage.getItem("callback-theme") === "light") {
+      document.documentElement.dataset.theme = "light";
+      document.querySelector('meta[name="theme-color"]').content = "#f5f2eb";
+    }
+  } catch { /* Dark remains the default when storage is unavailable. */ }
+</script>
+<title>Callback — Payment review</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header>
-  <div class="brand">
-    <h1>Callback</h1>
-    <span class="tag">Accounts Payable</span>
-  </div>
-  <nav class="tabs">
-    <button class="tab active" data-view="queue">Queue</button>
-    <button class="tab" data-view="vendors">Vendors</button>
-    <button class="tab" data-view="engine">Under the hood</button>
-  </nav>
+<a class="skip-link" href="#workspace">Skip to workspace</a>
+<header class="masthead">
+  <a class="brand" href="/" aria-label="Callback home">
+    <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M24 10a10 10 0 1 1-8-4" stroke="currentColor" stroke-width="2"/><path d="m20 3-5 3 5 4" stroke="currentColor" stroke-width="2"/></svg>
+    <span>Callback<span class="brand-period">.</span></span>
+  </a>
+  <div class="desk-label">Accounts payable<span>Verification desk</span></div>
   <div class="right">
-    <span id="status" class="status"></span>
+    <span id="status" class="status" role="status">Connecting…</span>
+    <label class="theme-toggle"><span>Dark mode</span><input id="dark-mode" type="checkbox" role="switch" checked></label>
     <button id="reset" class="ghost">Reset demo</button>
   </div>
 </header>
-
+<nav class="tabs" aria-label="Workspace sections">
+  <button class="tab active" data-view="queue" aria-current="page"><span class="tab-index" aria-hidden="true">01</span>Queue</button>
+  <button class="tab" data-view="vendors"><span class="tab-index" aria-hidden="true">02</span>Vendors</button>
+  <button class="tab" data-view="engine"><span class="tab-index" aria-hidden="true">03</span>Under the hood</button>
+  <span class="nav-note">Verify before you update.</span>
+</nav>
 <div id="mailbar" class="mailbar" hidden></div>
-
 <div id="error" class="note warn" role="alert" hidden></div>
-
-<main id="view-queue">
-  <section id="queue" class="queue">
-    <nav class="subtabs" id="subtabs"></nav>
-    <div id="holds"></div>
-  </section>
-
-  <section id="detail" class="detail">
-    <div class="empty">Select a held payment to see why it was stopped.</div>
-  </section>
+<main class="workspace" id="workspace" tabindex="-1">
+  <div id="view-queue">
+    <div class="page-heading">
+      <div><p class="eyebrow">The worklist</p><h1>Payment review</h1><p class="page-description">A second look at where the money goes.</p></div>
+      <div id="queue-summary" class="queue-summary" aria-label="Open queue summary"></div>
+    </div>
+    <div class="review-desk">
+      <section id="queue" class="queue" aria-label="Payment queue">
+        <nav class="subtabs" id="subtabs" aria-label="Queue filters"></nav>
+        <div id="holds"></div>
+      </section>
+      <section id="detail" class="detail" aria-label="Selected payment">
+        <div class="desk-empty"><span class="folio">Callback / review desk</span><div class="empty-symbol" aria-hidden="true">↳</div><h2>Start with the record.</h2><p>Choose an item from the queue to compare payment details and verify the request.</p><ol class="review-steps"><li><span>01</span>Read the request</li><li><span>02</span>Check the changes</li><li><span>03</span>Call the number on file</li></ol><span class="empty-footnote">The email asks. The callback confirms.</span></div>
+      </section>
+    </div>
+  </div>
+  <section id="view-vendors" class="engine" aria-label="Vendors" hidden></section>
+  <section id="view-engine" class="engine" aria-label="Under the hood" hidden></section>
 </main>
-
-<div id="view-vendors" class="engine" hidden></div>
-<div id="view-engine" class="engine" hidden></div>
-
+<footer class="desk-footer"><span>Callback <span aria-hidden="true">/</span> Payment verification</span><span>Trust the record. Check the request.</span></footer>
 <script src="app.js"></script>
 </body>
 </html>

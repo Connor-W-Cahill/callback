@@ -1,12 +1,13 @@
 """Backend for the AP clerk's hold queue."""
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from src import config, db
+from src import config, db, llm
 from src.extract import extractor
 from src.ingest import inbox
 from src.pipeline import process, verify
@@ -34,17 +35,35 @@ def status():
 @app.post("/api/reset")
 def reset():
     """Reseed and reprocess the demo inbox. Safe to hit between demo runs."""
-    if config.DB_PATH.exists():
-        config.DB_PATH.unlink()
+    for suffix in ("", "-wal", "-shm"):
+        f = Path(str(config.DB_PATH) + suffix)
+        if f.exists():
+            f.unlink()
+    llm.STATS.reset()
     c = conn()
     db.seed(c)
-    results = []
-    for m in inbox.load():
-        d = process(c, m)
-        results.append(
-            {"id": m["id"], "role": m.get("demo_role"), "held": d.held, "score": d.assessment.score}
-        )
-    return {"processed": results}
+    messages = inbox.load()
+
+    def run(m: dict) -> dict:
+        own = db.connect()  # sqlite connections are not shareable across threads
+        try:
+            d = process(own, m)
+            return {
+                "id": m["id"],
+                "role": m.get("demo_role"),
+                "held": d.held,
+                "score": d.assessment.score,
+                "source": d.assessment.source,
+            }
+        finally:
+            own.close()
+
+    with ThreadPoolExecutor(max_workers=min(8, len(messages))) as pool:
+        results = list(pool.map(run, messages))
+
+    order = {m["id"]: i for i, m in enumerate(messages)}
+    results.sort(key=lambda r: order[r["id"]])
+    return {"processed": results, "llm": {"succeeded": llm.STATS.succeeded, "fell_back": llm.STATS.failed}}
 
 
 @app.get("/api/messages")

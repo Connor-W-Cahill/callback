@@ -35,6 +35,7 @@ class Stats:
     succeeded: int = 0
     failed: int = 0
     reasons: dict = field(default_factory=dict)
+    used: dict = field(default_factory=dict)
 
     def note_fail(self, why: str) -> None:
         self.failed += 1
@@ -44,6 +45,7 @@ class Stats:
     def reset(self) -> None:
         self.attempts = self.succeeded = self.failed = 0
         self.reasons = {}
+        self.used = {}
 
     @property
     def fallback_rate(self) -> float:
@@ -72,22 +74,31 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0, max_token
 
     STATS.attempts += 1
     last = "unknown"
-    for attempt in range(RETRIES + 1):
-        try:
-            r = httpx.post(
-                f"{config.NVIDIA_BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {config.NVIDIA_API_KEY}"},
-                json=payload,
-                timeout=float(config.LLM_TIMEOUT),
-            )
-            r.raise_for_status()
-            out = _parse_json(r.json()["choices"][0]["message"]["content"])
-            STATS.succeeded += 1
-            return out
-        except Exception as e:  # noqa: BLE001 - transient; retry then fall back
-            last = f"{type(e).__name__}: {e}"
-            if attempt < RETRIES:
-                time.sleep(0.6 * (2 ** attempt))
+
+    # Walk the model chain. A model that 404s for this account, 503s, or hangs
+    # should cost us one timeout, not the whole request.
+    models = [config.NEMOTRON_MODEL] + [
+        m for m in config.NEMOTRON_MODELS if m != config.NEMOTRON_MODEL
+    ]
+    for model in models:
+        payload["model"] = model
+        for attempt in range(RETRIES + 1):
+            try:
+                r = httpx.post(
+                    f"{config.NVIDIA_BASE_URL}/chat/completions",
+                    headers={"Authorization": f"Bearer {config.NVIDIA_API_KEY}"},
+                    json=payload,
+                    timeout=float(config.LLM_TIMEOUT),
+                )
+                r.raise_for_status()
+                out = _parse_json(r.json()["choices"][0]["message"]["content"])
+                STATS.succeeded += 1
+                STATS.used[model] = STATS.used.get(model, 0) + 1
+                return out
+            except Exception as e:  # noqa: BLE001 - transient; retry, then next model
+                last = f"{type(e).__name__} on {model.split('/')[-1]}: {e}"
+                if attempt < RETRIES:
+                    time.sleep(0.5)
 
     STATS.note_fail(last)
     raise LLMUnavailable(last)

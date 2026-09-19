@@ -19,7 +19,9 @@ is fraudulent, holds the payment, places the verification call itself, and judge
 3. **Resolve** — fuzzy-match the claimed vendor against the vendor master
 4. **Score** — risk features vs. vendor history, plus a written rationale naming what fired
 5. **Hold** — anything touching payment details is held; this is policy, not a score
-6. **Call back** — voice agent dials the *on-file* number and asks the vendor to confirm
+6. **Call back** — voice agent dials the *on-file* number and asks the vendor to confirm.
+   The vendor's answer arrives one of three ways, all producing the same transcript:
+   **spoken** (a human talks, ElevenLabs STT transcribes), **typed**, or **scripted**
 7. **Judge** — a model reads the transcript: confirmed / denied / unclear (unclear escalates to a human)
 8. **Resolve** — write to the vendor master with an audit entry, or stay blocked and flag
 
@@ -60,6 +62,21 @@ evals/cases/   labeled synthetic emails
 evals/transcripts/  labeled synthetic call transcripts
 ```
 
+## The verification call
+
+Click a held payment, then **Place verification call**. The agent's question is
+rendered by ElevenLabs TTS and plays in the browser. Then the vendor answers:
+
+- **Speak it.** Click record, talk into the mic, stop. The audio goes to
+  ElevenLabs speech-to-text and the transcript goes to the judge. Nothing about
+  the reply was written in advance — hand a judge the mic and let them say
+  "we never sent that."
+- **Type it.** Same path, no key needed.
+- **Use the scripted reply.** Deterministic, for a demo run that must not vary.
+
+The transcript shape is identical either way, so the judge cannot tell how the
+words were captured. Both audio clips are kept and replayable in the UI.
+
 ## Data
 
 All synthetic. No real account numbers, credentials, or financial records — required by the Compound
@@ -80,9 +97,10 @@ uv venv && uv pip install fastapi 'uvicorn[standard]' httpx python-dotenv
 Copy `.env.example` to `.env` and fill in the two keys:
 
 - **`NVIDIA_API_KEY`** — sign up at [build.nvidia.com](https://build.nvidia.com), free credits on signup.
-  Default model is `nvidia/nemotron-nano-3-30b-a3b` (fast; this pipeline makes three
-  calls per message and demo latency matters). Swap `NEMOTRON_MODEL` to
-  `nvidia/nemotron-3-super-120b-a12b` for quality.
+  **Being listed in NVIDIA's public model catalog does not mean your account can
+  call it** — most `nemotron` ids return 404 "not found for account". Run the
+  preflight, which tries the configured model and auto-discovers a working
+  substitute if it fails.
 - **`ELEVENLABS_API_KEY`** — [elevenlabs.io](https://elevenlabs.io), Profile → API Keys.
   Every SteelHacks participant gets one free month of Creator tier (131k credits).
 
@@ -134,6 +152,36 @@ what proves it matters.
 alongside the judge's cues, so 100% there reflects an absence of hard cases more
 than a strong result. Expanding it with adversarial transcripts is the obvious
 next step.
+
+## Notes from running it live
+
+**NVIDIA's free tier is unreliable, and you should plan around it.** Measured
+over one afternoon: `nemotron-nano-3-30b-a3b` and most `llama-*-nemotron` ids
+return `404 not found for account` despite being in the public catalog;
+`nemotron-3.5-lightning-30b-a3b` served fine one hour and timed out every call
+the next; `nemotron-3-super-120b-a12b` went from 0.9s to 503 to timeout within
+an hour. Identical requests return clean JSON, truncated bodies, or 503s.
+
+Three mitigations, all in `src/llm.py` and `src/config.py`:
+
+- **A model chain** (`NEMOTRON_MODELS`), tried in order, then rules. One dead
+  model costs one timeout, not the request.
+- **A short timeout** (`LLM_TIMEOUT`, default 12s). A healthy call returns in
+  5–8s; there is no value in waiting two minutes to learn it will not.
+- **Concurrent processing.** `/api/reset` runs the inbox through a thread pool,
+  turning a minute of dead air before a demo into ~30s.
+
+Critically, the eval **reports how many model calls fell back** — without that
+number a fallback is indistinguishable from a model that agreed with the rules,
+and a "rules + Nemotron" column could quietly be rules. Check that line before
+quoting any comparison to a judge.
+
+### ElevenLabs, verified live
+
+TTS and STT both round-trip correctly: the agent's question renders, real audio
+transcribes back verbatim, and the judge acts on words nobody scripted. Note the
+free tier is **10,000 characters (~31 verification calls)**, not the 131k that
+the SteelHacks Creator-tier perk grants — redeem that separately.
 
 ## Known bug found by the eval
 

@@ -76,7 +76,7 @@ def extract(message: dict) -> Extraction:
     """Extract with Nemotron, falling back to rules on any failure."""
     text = _message_text(message)
     try:
-        data = llm.complete_json(SYSTEM, text)
+        data = llm.complete_json(SYSTEM, text, job="extract")
         return _from_model(data)
     except llm.LLMUnavailable:
         return extract_rules(message)

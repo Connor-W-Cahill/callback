@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from src import config
+from src import config, telemetry
 
 TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
@@ -73,6 +73,9 @@ def place_call(
 
 def synthesize(text: str, tag: str) -> str:
     """Render the agent's line to an mp3 via ElevenLabs TTS."""
+    import time as _t
+
+    t0 = _t.time()
     config.RECORDINGS.mkdir(parents=True, exist_ok=True)
     out = config.RECORDINGS / f"{tag}.mp3"
     r = httpx.post(
@@ -80,6 +83,14 @@ def synthesize(text: str, tag: str) -> str:
         headers={"xi-api-key": config.ELEVENLABS_API_KEY, "Content-Type": "application/json"},
         json={"text": text, "model_id": "eleven_turbo_v2_5"},
         timeout=60.0,
+    )
+    ok = r.status_code == 200
+    telemetry.record(
+        service="elevenlabs", job="tts", model=config.ELEVENLABS_VOICE_ID, ok=ok,
+        ms=int((_t.time() - t0) * 1000), units=len(text),
+        detail="" if ok else r.text[:200],
+        prompt_excerpt=text,
+        response_excerpt=f"{len(r.content):,} bytes of audio" if ok else "",
     )
     r.raise_for_status()
     out.write_bytes(r.content)
@@ -109,6 +120,9 @@ def transcribe(data: bytes, filename: str = "reply.webm", *, keep_as: str | None
         out.write_bytes(data)
         saved = str(out.relative_to(config.ROOT))
 
+    import time as _t
+
+    t0 = _t.time()
     try:
         r = httpx.post(
             STT_URL,
@@ -119,9 +133,20 @@ def transcribe(data: bytes, filename: str = "reply.webm", *, keep_as: str | None
         )
         r.raise_for_status()
     except httpx.HTTPError as e:
+        telemetry.record(
+            service="elevenlabs", job="stt", model="scribe_v1", ok=False,
+            ms=int((_t.time() - t0) * 1000), units=len(data), detail=str(e)[:200],
+        )
         raise STTUnavailable(f"speech-to-text failed: {e}") from e
 
     text = (r.json() or {}).get("text", "").strip()
+    telemetry.record(
+        service="elevenlabs", job="stt", model="scribe_v1", ok=bool(text),
+        ms=int((_t.time() - t0) * 1000), units=len(data),
+        prompt_excerpt=f"{len(data):,} bytes of audio ({filename})",
+        response_excerpt=text,
+        detail="" if text else "no words returned",
+    )
     if not text:
         raise STTUnavailable("speech-to-text returned no words")
     return text, saved

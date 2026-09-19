@@ -77,6 +77,19 @@ rendered by ElevenLabs TTS and plays in the browser. Then the vendor answers:
 The transcript shape is identical either way, so the judge cannot tell how the
 words were captured. Both audio clips are kept and replayable in the UI.
 
+## Under the hood
+
+The second tab in the UI shows **every call to Nemotron and ElevenLabs as it
+happened** — which job, which model, how long it took, what was sent and what came
+back, and which calls failed and fell through to the next model.
+
+It exists because both tool tracks ask us to prove something rather than assert it:
+Nemotron wants to see where the model fits and evidence it works, ElevenLabs wants
+voice to be a real part of how the project works. A judge can watch the requests
+land instead of taking our word for it. It also makes the fallback behaviour
+visible: when a model times out you can see exactly that, rather than wondering
+why a rationale reads a bit flat.
+
 ## Data
 
 All synthetic. No real account numbers, credentials, or financial records — required by the Compound

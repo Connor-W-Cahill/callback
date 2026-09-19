@@ -226,3 +226,102 @@ $("#reset").addEventListener("click", async () => {
 
 loadStatus();
 api("/api/reset", { method: "POST" }).then(load);
+
+
+// --- "Under the hood": what Nemotron and ElevenLabs actually did -----------
+
+const JOBS = {
+  extract: ["Extract", "Unstructured email → structured JSON. Nemotron job 1."],
+  score: ["Score", "Weigh the precomputed signals, write the clerk's rationale. Nemotron job 2."],
+  judge: ["Judge", "Read the call transcript → confirmed / denied / unclear. Nemotron job 3, model-as-judge."],
+  tts: ["Text to speech", "Render the agent's question so a human can hear it. ElevenLabs."],
+  stt: ["Speech to text", "Turn what the vendor actually said into words. ElevenLabs."],
+};
+
+function switchView(view) {
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
+  $("#view-queue").hidden = view !== "queue";
+  $("#view-engine").hidden = view !== "engine";
+  if (view === "engine") renderEngine();
+}
+
+async function renderEngine() {
+  const d = await api("/api/activity");
+  const el = $("#view-engine");
+  const c = d.config;
+
+  const nem = d.summary.filter((s) => s.service === "nemotron");
+  const el11 = d.summary.filter((s) => s.service === "elevenlabs");
+
+  el.innerHTML = `
+    <div class="engine-inner">
+      <h2>What the models are actually doing</h2>
+      <p class="lede">Every call to Nemotron and ElevenLabs, as it happened. Nothing here is
+        a mock — if a row says it succeeded, that request went out and came back.</p>
+
+      <div class="svc">
+        <h3>Nemotron <span class="${c.nemotron_live ? "ok" : "off"}">${c.nemotron_live ? "live" : "offline — using deterministic fallback"}</span></h3>
+        <div class="chain">Chain, tried in order then falling back to rules:
+          ${c.nemotron_chain.map((m, i) => `<code>${i + 1}. ${m.split("/").pop()}</code>`).join(" ")}
+          <span class="note">timeout ${c.timeout_s}s</span></div>
+        ${summaryTable(nem)}
+      </div>
+
+      <div class="svc">
+        <h3>ElevenLabs <span class="${c.elevenlabs_live ? "ok" : "off"}">${c.elevenlabs_live ? "live" : "simulated"}</span></h3>
+        <div class="chain">Voice <code>${c.voice_id}</code>
+          <span class="note">${d.elevenlabs_chars_used_this_session.toLocaleString()} characters spent this session</span></div>
+        ${summaryTable(el11)}
+      </div>
+
+      <h3 style="margin-top:28px">Call log</h3>
+      <div class="log">${d.calls.length ? d.calls.map(callRow).join("") : '<div class="empty">No calls yet — reset the demo or place a verification call.</div>'}</div>
+    </div>`;
+
+  el.querySelectorAll(".logrow").forEach((r) =>
+    r.addEventListener("click", () => r.classList.toggle("open"))
+  );
+}
+
+function summaryTable(rows) {
+  if (!rows.length) return '<div class="note">No calls yet.</div>';
+  return `<table class="sum">
+    <tr><th>Job</th><th>What it does</th><th>Calls</th><th>Avg</th><th>Model</th></tr>
+    ${rows.map((r) => {
+      const [name, desc] = JOBS[r.job] || [r.job, ""];
+      const models = Object.entries(r.models).map(([m, n]) => `${m.split("/").pop()} ×${n}`).join(", ");
+      return `<tr>
+        <td><b>${name}</b></td>
+        <td class="desc">${desc}</td>
+        <td>${r.ok}/${r.calls}${r.failed ? ` <span class="fail">${r.failed} failed</span>` : ""}</td>
+        <td>${(r.avg_ms / 1000).toFixed(1)}s</td>
+        <td class="mono">${models || "—"}</td>
+      </tr>`;
+    }).join("")}
+  </table>`;
+}
+
+function callRow(c) {
+  const [name] = JOBS[c.job] || [c.job];
+  const t = new Date(c.at).toLocaleTimeString();
+  return `<div class="logrow ${c.ok ? "" : "bad"}">
+    <div class="head">
+      <span class="badge ${c.service}">${c.service}</span>
+      <b>${name}</b>
+      <span class="mono dim">${(c.model || "").split("/").pop()}</span>
+      <span class="grow"></span>
+      <span class="dim">${(c.ms / 1000).toFixed(1)}s</span>
+      <span class="${c.ok ? "ok" : "fail"}">${c.ok ? "ok" : "failed"}</span>
+      <span class="dim">${t}</span>
+    </div>
+    ${c.detail ? `<div class="err">${escapeHtml(c.detail)}</div>` : ""}
+    <div class="body">
+      ${c.prompt_excerpt ? `<div class="pane"><h5>Sent</h5><pre>${escapeHtml(c.prompt_excerpt)}</pre></div>` : ""}
+      ${c.response_excerpt ? `<div class="pane"><h5>Returned</h5><pre>${escapeHtml(c.response_excerpt)}</pre></div>` : ""}
+    </div>
+  </div>`;
+}
+
+document.querySelectorAll(".tab").forEach((t) =>
+  t.addEventListener("click", () => switchView(t.dataset.view))
+);

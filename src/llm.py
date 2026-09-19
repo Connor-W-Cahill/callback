@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from src import config
+from src import config, telemetry
 
 
 class LLMUnavailable(RuntimeError):
@@ -57,7 +57,8 @@ STATS = Stats()
 RETRIES = int(os.getenv("LLM_RETRIES", "2"))
 
 
-def complete_json(system: str, user: str, *, temperature: float = 0.0, max_tokens: int = 900) -> dict[str, Any]:
+def complete_json(system: str, user: str, *, temperature: float = 0.0,
+                  max_tokens: int = 900, job: str = "call") -> dict[str, Any]:
     """Call Nemotron and parse a JSON object out of the reply."""
     if not config.have_nemotron():
         raise LLMUnavailable("NVIDIA_API_KEY not set")
@@ -83,6 +84,8 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0, max_token
     for model in models:
         payload["model"] = model
         for attempt in range(RETRIES + 1):
+            t0 = time.time()
+            raw = ""
             try:
                 r = httpx.post(
                     f"{config.NVIDIA_BASE_URL}/chat/completions",
@@ -91,12 +94,23 @@ def complete_json(system: str, user: str, *, temperature: float = 0.0, max_token
                     timeout=float(config.LLM_TIMEOUT),
                 )
                 r.raise_for_status()
-                out = _parse_json(r.json()["choices"][0]["message"]["content"])
+                raw = r.json()["choices"][0]["message"]["content"]
+                out = _parse_json(raw)
                 STATS.succeeded += 1
                 STATS.used[model] = STATS.used.get(model, 0) + 1
+                telemetry.record(
+                    service="nemotron", job=job, model=model, ok=True,
+                    ms=int((time.time() - t0) * 1000), units=len(raw),
+                    prompt_excerpt=user, response_excerpt=raw,
+                )
                 return out
             except Exception as e:  # noqa: BLE001 - transient; retry, then next model
                 last = f"{type(e).__name__} on {model.split('/')[-1]}: {e}"
+                telemetry.record(
+                    service="nemotron", job=job, model=model, ok=False,
+                    ms=int((time.time() - t0) * 1000), detail=last,
+                    prompt_excerpt=user, response_excerpt=raw,
+                )
                 if attempt < RETRIES:
                     time.sleep(0.5)
 

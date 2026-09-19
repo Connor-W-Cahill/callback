@@ -91,3 +91,51 @@ button.recording { background: var(--danger); color: #fff; }
   font-size: 11px; background: #1c2331; color: var(--dim);
 }
 .src.live { background: #12291b; color: var(--ok); }
+
+/* --- tabs --- */
+.tabs { display: flex; gap: 4px; margin-left: 28px; }
+.tab {
+  background: transparent; color: var(--dim); border: 0; border-bottom: 2px solid transparent;
+  border-radius: 0; padding: 8px 14px; font-weight: 500; font-size: 14px;
+}
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab:hover { color: var(--text); }
+
+/* --- under the hood --- */
+.engine { overflow-y: auto; height: calc(100vh - 61px); }
+.engine-inner { max-width: 1000px; margin: 0 auto; padding: 28px 24px 60px; }
+.engine h2 { font-size: 22px; text-transform: none; letter-spacing: -0.01em; color: var(--text); margin: 0 0 6px; }
+.lede { color: var(--dim); margin: 0 0 26px; max-width: 66ch; }
+.svc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; margin-bottom: 16px; }
+.svc h3 { margin: 0 0 10px; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.svc h3 .ok, .svc h3 .off { font-size: 11px; padding: 2px 9px; border-radius: 999px; font-weight: 700; text-transform: uppercase; }
+.ok { color: var(--ok); }
+.off, .fail { color: var(--danger); }
+.svc h3 .ok { background: #12291b; }
+.svc h3 .off { background: var(--danger-bg); }
+.chain { font-size: 13px; color: var(--dim); margin-bottom: 14px; }
+.chain code { background: #12141a; padding: 2px 7px; border-radius: 4px; margin-right: 4px; color: #c8ccd4; }
+table.sum { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.sum th { text-align: left; color: var(--dim); font-weight: 500; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .06em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.sum td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.sum td.desc { color: var(--dim); max-width: 340px; }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; }
+.dim { color: var(--dim); }
+.log { display: flex; flex-direction: column; gap: 6px; }
+.logrow { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--ok);
+  border-radius: 6px; padding: 10px 13px; cursor: pointer; }
+.logrow.bad { border-left-color: var(--danger); }
+.logrow .head { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.logrow .grow { flex: 1; }
+.logrow .body { display: none; margin-top: 12px; gap: 14px; }
+.logrow.open .body { display: flex; }
+.logrow .pane { flex: 1; min-width: 0; }
+.logrow h5 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+.logrow pre { margin: 0; background: #12141a; border-radius: 5px; padding: 10px; font-size: 12px;
+  white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; color: #c8ccd4; }
+.logrow .err { margin-top: 8px; font-size: 12px; color: var(--danger); font-family: ui-monospace, monospace; }
+.badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  padding: 2px 7px; border-radius: 4px; }
+.badge.nemotron { background: #16301a; color: #7ee787; }
+.badge.elevenlabs { background: #1c2331; color: var(--accent); }

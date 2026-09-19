@@ -20,11 +20,32 @@ Weigh them and return ONLY this JSON object:
   "top_signals": ["signal_key", ...]
 }
 
-Write the rationale the way a colleague would explain it out loud: name the
-specific evidence, no jargon, no hedging. Never exceed 40 words.
-Business email compromise is the threat model: a stranger posing as a known
-vendor to redirect a payment. Missing one is far worse than a false alarm."""
+THE THREAT: business email compromise -- a stranger posing as a known vendor to
+redirect a payment. Missing one is far worse than a false alarm.
 
+BUT: vendors do genuinely change banks. A real change is a routine business event,
+not an attack. Every payment-detail change is verified by phone regardless of your
+score, so you are NOT the last line of defence and you do not need to inflate a
+score to force a check. Your score decides how urgently a human looks at it.
+
+CALIBRATE LIKE THIS:
+  0.8-1.0  deception is present: a look-alike domain, a redirected reply-to, an
+           unknown sender, or the message discouraging verification.
+  0.4-0.7  a payment change with something odd about it, but no sign of deception.
+  0.2-0.4  a payment change from a genuine, known sender with nothing else wrong.
+           This is what a LEGITIMATE bank change looks like. Score it here.
+  0.0-0.2  nothing unusual.
+
+WEIGH ABSENCE AS EVIDENCE. A changed account on its own is not deception. When the
+sender address is one you have corresponded with, the domain matches exactly, the
+reply-to is consistent, and the message invites a phone call, those are exculpatory
+and the score belongs near the bottom of its band. Urgency alone is weak -- real
+invoices are often urgent.
+
+Write the rationale the way a colleague would explain it out loud: name the specific
+evidence, no jargon, no hedging. Never exceed 40 words. Do not assert fraud when the
+only signal is that the account changed -- say what you see and what is missing.
+"""
 
 @dataclass
 class Assessment:
@@ -37,7 +58,7 @@ class Assessment:
 def assess(signals: list[Signal], *, vendor: dict | None, extraction) -> Assessment:
     floor = base_score(signals)
     try:
-        data = llm.complete_json(SYSTEM, _prompt(signals, vendor, extraction))
+        data = llm.complete_json(SYSTEM, _prompt(signals, vendor, extraction), job="score")
         score = float(data.get("score", floor))
         rationale = str(data.get("rationale", "")).strip()
         if not rationale:

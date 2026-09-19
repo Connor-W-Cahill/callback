@@ -7,7 +7,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from src import config, db, llm
+from src import config, db, llm, telemetry
 from src.extract import extractor
 from src.ingest import inbox
 from src.pipeline import process, verify
@@ -41,6 +41,7 @@ def reset():
     llm.STATS.reset()
     c = conn()
     db.clear(c)
+    telemetry.clear()
     db.seed(c)
     messages = inbox.load()
 
@@ -184,6 +185,42 @@ def run_verification(hold_id: str, scripted_reply: str | None = None):
         raise HTTPException(404, "no such hold") from None
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
+
+
+@app.get("/api/activity")
+def activity():
+    """Every external service call, so a judge can see the models actually working."""
+    rows = telemetry.recent(200)
+    agg: dict = {}
+    for r in rows:
+        key = (r["service"], r["job"])
+        a = agg.setdefault(
+            "%s:%s" % key,
+            {"service": r["service"], "job": r["job"], "calls": 0, "ok": 0,
+             "failed": 0, "total_ms": 0, "units": 0, "models": {}},
+        )
+        a["calls"] += 1
+        a["ok" if r["ok"] else "failed"] += 1
+        a["total_ms"] += r["ms"] or 0
+        a["units"] += r["units"] or 0
+        if r["model"]:
+            a["models"][r["model"]] = a["models"].get(r["model"], 0) + 1
+    for a in agg.values():
+        a["avg_ms"] = round(a["total_ms"] / a["calls"]) if a["calls"] else 0
+
+    tts_chars = sum(r["units"] or 0 for r in rows if r["job"] == "tts" and r["ok"])
+    return {
+        "calls": rows,
+        "summary": sorted(agg.values(), key=lambda a: (a["service"], a["job"])),
+        "config": {
+            "nemotron_chain": config.NEMOTRON_MODELS,
+            "nemotron_live": config.have_nemotron(),
+            "elevenlabs_live": config.have_elevenlabs(),
+            "voice_id": config.ELEVENLABS_VOICE_ID,
+            "timeout_s": config.LLM_TIMEOUT,
+        },
+        "elevenlabs_chars_used_this_session": tts_chars,
+    }
 
 
 @app.get("/api/audit")

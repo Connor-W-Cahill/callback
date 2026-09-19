@@ -14,6 +14,8 @@ from src.pipeline import process
 from src.voice import telephony
 
 POLL_SECONDS = 6
+# Below this, an inferred vendor is reviewed by a human rather than dialled.
+AUTO_CALL_MIN_CONFIDENCE = 0.8
 
 _state: dict = {
     "running": False,
@@ -78,6 +80,19 @@ def _maybe_auto_call(conn, decision) -> None:
     if not decision.vendor:
         print("[mail] held, but no vendor on file to call")
         return
+
+    # An inferred identity is a lead. Auto-dialling on one means phoning a
+    # number belonging to whoever we guessed -- so a weak match stays for a
+    # human. The clerk can still place the call by hand.
+    inferred = next(
+        (s for s in decision.signals if s.key == "inferred_identity" and s.fired), None
+    )
+    if inferred:
+        conf = decision.match_confidence
+        if conf < AUTO_CALL_MIN_CONFIDENCE:
+            print(f"[mail] vendor only inferred ({conf:.0%}); leaving for review "
+                  f"instead of auto-dialling")
+            return
     try:
         from src.api.app import start_verification_call
 

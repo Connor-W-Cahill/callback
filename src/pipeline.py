@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from src import config, db
 from src.extract import extractor
 from src.judge import judge as judging
-from src.score import features, resolve, scorer
+from src.score import features, resolve, scorer, vendor_match
 from src.voice import agent as voice
 
 
@@ -26,6 +26,8 @@ class Decision:
     held: bool
     reason: str
     hold_id: str | None = None
+    match_confidence: float = 1.0
+    matched_on: str = ""
 
 
 def _now() -> str:
@@ -42,6 +44,23 @@ def process(conn: sqlite3.Connection, message: dict, *, use_llm: bool = True) ->
     vendor, evidence = resolve.resolve(
         vendors, sender=message.get("sender", ""), claimed_name=ex.vendor_name or message.get("claimed_vendor")
     )
+
+    # Deterministic resolution needs a known sender, domain or near-exact name.
+    # When it finds nothing, fall back to identifying the vendor from what the
+    # email actually talks about. A match this way is a LEAD, not an identity:
+    # evidence records how weak it is so the rest of the pipeline can treat it
+    # with suspicion rather than trust.
+    if vendor is None:
+        text = extractor._message_text(message)
+        m = vendor_match.match(text, vendors, use_llm=use_llm)
+        if m.vendor:
+            vendor = m.vendor
+            evidence.update(
+                matched_on=f"inferred_{m.source}",
+                match_confidence=m.confidence,
+                match_evidence=m.evidence,
+                match_terms=m.terms,
+            )
     history = db.payments_for(conn, vendor["id"]) if vendor else []
     sig = features.compute(
         extraction=ex, vendor=vendor, history=history, message=message, match_evidence=evidence
@@ -77,7 +96,11 @@ def process(conn: sqlite3.Connection, message: dict, *, use_llm: bool = True) ->
         conn.execute("UPDATE message SET status='extraneous' WHERE id=?", (message["id"],))
         conn.commit()
         db.log(conn, "system", "message_extraneous", message["id"], "not payment related")
-        return Decision(message["id"], vendor, ex, sig, assessment, False, "not payment related")
+        return Decision(
+            message["id"], vendor, ex, sig, assessment, False, "not payment related",
+            match_confidence=float(evidence.get("match_confidence", 1.0)),
+            matched_on=str(evidence.get("matched_on", "")),
+        )
 
     _save_message(conn, message, ex)
     hold_id = None
@@ -89,7 +112,11 @@ def process(conn: sqlite3.Connection, message: dict, *, use_llm: bool = True) ->
         conn.commit()
         db.log(conn, "system", "message_cleared", message["id"], assessment.rationale)
 
-    return Decision(message["id"], vendor, ex, sig, assessment, held, reason, hold_id)
+    return Decision(
+        message["id"], vendor, ex, sig, assessment, held, reason, hold_id,
+        match_confidence=float(evidence.get("match_confidence", 1.0)),
+        matched_on=str(evidence.get("matched_on", "")),
+    )
 
 
 def verify(

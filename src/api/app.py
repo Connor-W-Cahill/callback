@@ -346,10 +346,13 @@ def board():
             "SELECT judgment, reply_source, created_at FROM verification "
             "WHERE hold_id=? ORDER BY id DESC LIMIT 1", (d["id"],)
         ).fetchone()
+        sigs = json.loads(d["signals"])
+        inferred = any(s["key"] == "inferred_identity" and s["fired"] for s in sigs)
         return {
             "id": d["id"], "kind": "hold",
             "vendor_name": d["vendor_name"], "vendor_id": d["vendor_id"],
-            "identified": bool(d["vendor_id"]),
+            "identified": bool(d["vendor_id"]) and not inferred,
+            "inferred": inferred,
             "sender": d["sender"], "subject": d["subject"],
             "received_at": d["received_at"], "score": d["score"],
             "rationale": d["rationale"], "status": d["status"],

@@ -70,14 +70,32 @@ def compute(
     sig.append(Signal("lookalike_domain", lookalike, 0.25, detail))
 
     # --- unresolvable vendor ---
+    matched_on = match_evidence.get("matched_on", "")
+    inferred = matched_on.startswith("inferred")
+    if vendor is None:
+        detail = "could not match this sender to any vendor on file"
+    elif inferred:
+        conf = match_evidence.get("match_confidence", 0)
+        detail = (
+            f"sender is not on file for {vendor['name']}; identified from content "
+            f"({match_evidence.get('match_evidence', '')}) at {conf:.0%} confidence"
+        )
+    else:
+        detail = f"resolved to {vendor['name']} via {matched_on}"
+    sig.append(Signal("unknown_vendor", vendor is None, 0.20, detail))
+
+    # --- identified only by inference ---
+    # Knowing who they *probably* are is not knowing who they are. If the bank
+    # details also changed, an inferred identity is exactly the shape of an
+    # attacker mailing from an address we have never seen.
     sig.append(
         Signal(
-            "unknown_vendor",
-            vendor is None,
-            0.20,
-            "could not match this sender to any vendor on file"
-            if vendor is None
-            else f"resolved to {vendor['name']} via {match_evidence.get('matched_on')}",
+            "inferred_identity",
+            inferred,
+            0.15,
+            f"vendor inferred from message content, not from a known sender or domain"
+            if inferred
+            else "vendor identified from the sender itself",
         )
     )
 

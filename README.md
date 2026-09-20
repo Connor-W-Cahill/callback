@@ -1,4 +1,4 @@
-# Callback
+# Trouvé
 
 **Vendor payment-change fraud interceptor.** Built at SteelHacks XIII, University of Pittsburgh, Sept 19–20 2026.
 
@@ -7,10 +7,13 @@ pay and says their banking details have changed. AP updates the record, the next
 the money goes to the attacker. The defense is callback verification: phone the vendor at the number
 already on file and confirm. It works, and it is the first thing skipped when AP is busy.
 
-Callback does it automatically. It reads inbound vendor email, scores how likely a payment-detail change
+Trouvé does it automatically. It reads inbound vendor email, scores how likely a payment-detail change
 is fraudulent, holds the payment, places the verification call itself, and judges what the vendor said.
 
 **The email is the attack, so we don't use email to check it.**
+
+The Trouvé identity uses a geometric T monogram with an acute accent.
+The scalable logo is in `web/trouve-mark.svg`.
 
 ## How it works
 

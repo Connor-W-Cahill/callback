@@ -36,7 +36,7 @@ async def require_access(request: Request):
         return
     credentials = await basic_auth(request)
     if not credentials or not secrets.compare_digest(credentials.password.encode(), config.API_PASSWORD.encode()):
-        raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": 'Basic realm="Callback"'})
+        raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": 'Basic realm="Trouve"'})
 
 
 def require_demo():
@@ -44,7 +44,7 @@ def require_demo():
         raise HTTPException(403, "This operation is available only in demo mode")
 
 
-app = FastAPI(title="Callback", description="Vendor payment-change fraud interceptor",
+app = FastAPI(title="Trouvé", description="Vendor payment-change fraud interceptor",
               dependencies=[Depends(require_access)])
 WEB = config.ROOT / "web"
 

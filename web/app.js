@@ -6,7 +6,7 @@ const emptyDeskMarkup = $("#detail").innerHTML;
 function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
   $("#dark-mode").checked = theme === "dark";
-  $('meta[name="theme-color"]').content = theme === "dark" ? "#191b19" : "#f5f2eb";
+  $('meta[name="theme-color"]').content = theme === "dark" ? "#111b29" : "#f4efe5";
   try { localStorage.setItem("callback-theme", theme); } catch { /* Still works for this visit. */ }
 }
 
@@ -21,38 +21,28 @@ async function api(path, opts) {
   return r.json();
 }
 
-async function loadMailbox() {
-  let m;
+$("#copyaddr").addEventListener("click", async () => {
+  const button = $("#copyaddr");
   try {
-    m = await api("/api/mailbox");
-  } catch (e) {
-    return;
+    await navigator.clipboard.writeText($("#mailaddr").textContent);
+    button.textContent = "Copied";
+  } catch {
+    button.textContent = "Select address to copy";
   }
-  const bar = $("#mailbar");
-  if (!m.address) {
-    if (m.error) {
-      bar.hidden = false;
-      bar.innerHTML = `<span class="fail">Inbox unavailable: ${escapeHtml(m.error)}</span>`;
-    }
-    return;
+  setTimeout(() => { button.textContent = "Copy"; }, 1500);
+});
+
+async function loadMailbox() {
+  const status = $("#mail-status");
+  try {
+    const m = await api("/api/mailbox");
+    if (m.address) $("#mailaddr").textContent = m.address;
+    status.textContent = m.error ? "Inbox connection unavailable" : m.running
+      ? `${m.received} received · checking every ${m.poll_seconds}s`
+      : "Email processing requires the local demo server";
+  } catch {
+    status.textContent = "Inbox connection unavailable";
   }
-  bar.hidden = false;
-  bar.innerHTML = `
-    <span class="live-dot"></span>
-    <span class="mail-label">Receiving at</span>
-    <code id="mailaddr">${escapeHtml(m.address)}</code>
-    <button id="copyaddr" class="ghost">Copy</button>
-    <span class="grow"></span>
-    <span class="dim">${m.received} received · checking every ${m.poll_seconds}s</span>`;
-  $("#copyaddr").addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(m.address);
-      $("#copyaddr").textContent = "Copied";
-      setTimeout(() => ($("#copyaddr").textContent = "Copy"), 1500);
-    } catch (e) {
-      /* clipboard blocked; the address is on screen anyway */
-    }
-  });
 }
 
 async function loadStatus() {
@@ -553,7 +543,7 @@ async function renderVendors() {
   vendors = await api("/api/vendors");
   $("#view-vendors").innerHTML = `
     <div class="engine-inner">
-      <div class="section-heading"><div><p class="eyebrow">The source of truth</p><h2>Vendor master</h2>
+      <div class="section-heading"><div><h2>Vendor master</h2>
       <p class="lede">Known contacts and payment details. Every incoming request is checked against this record.</p></div>
       ${demoMode ? '<button id="addvendor">Add vendor <span aria-hidden="true">+</span></button>' : '<span class="folio">Read-only in live mode</span>'}</div>
       <div class="vlist">${vendors.map(vendorCard).join("")}</div>

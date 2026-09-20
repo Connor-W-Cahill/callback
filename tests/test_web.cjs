@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 
-function page(detail, { savedTheme, storageBlocked = false } = {}) {
+function page(detail, { savedTheme, storageBlocked = false, mailbox = {} } = {}) {
   const storage = new Map(savedTheme ? [["callback-theme", savedTheme]] : []);
   const root = { dataset: { theme: "dark" } };
   const elements = new Map();
@@ -23,7 +23,7 @@ function page(detail, { savedTheme, storageBlocked = false } = {}) {
     setInterval() {}, setTimeout() {}, console,
     fetch: async path => ({ ok: true, json: async () => {
       if (path === '/api/status') return { demo_mode: true, nemotron: 'offline', elevenlabs: 'simulated' };
-      if (path === '/api/mailbox') return {};
+      if (path === '/api/mailbox') return mailbox;
       if (path === '/api/board') return { open: {}, settled: {}, extraneous: [] };
       return detail;
     }}),
@@ -116,7 +116,7 @@ test('dark mode is the default and slider changes persist', () => {
   slider.listeners.change({ target: { checked: false } });
   assert.equal(root.dataset.theme, 'light');
   assert.equal(storage.get('callback-theme'), 'light');
-  assert.equal(element('meta[name="theme-color"]').content, '#f5f2eb');
+  assert.equal(element('meta[name="theme-color"]').content, '#f4efe5');
   slider.listeners.change({ target: { checked: true } });
   assert.equal(root.dataset.theme, 'dark');
   assert.equal(storage.get('callback-theme'), 'dark');
@@ -133,4 +133,18 @@ test('theme slider works when browser storage is blocked', () => {
   assert.equal(root.dataset.theme, 'dark');
   assert.doesNotThrow(() => context.setTheme('light'));
   assert.equal(root.dataset.theme, 'light');
+});
+
+
+test('demo email stays visible offline and uses the active inbox when connected', async () => {
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  assert.match(html, /id="mailaddr">skodyctpwd@uberip.com/);
+  assert.doesNotMatch(html, /id="mailbar"[^>]*hidden/);
+  const offline = page(hold);
+  await offline.context.loadMailbox();
+  assert.match(offline.element('#mail-status').textContent, /requires the local demo server/);
+  const live = page(hold, { mailbox: { address: 'active@example.com', running: true, received: 3, poll_seconds: 6 } });
+  await live.context.loadMailbox();
+  assert.equal(live.element('#mailaddr').textContent, 'active@example.com');
+  assert.equal(live.element('#mail-status').textContent, '3 received · checking every 6s');
 });
